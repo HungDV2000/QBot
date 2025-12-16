@@ -1,0 +1,52 @@
+[global]
+
+# Binance Futures API Configuration
+# Lấy từ: https://www.binance.com/en/my/settings/api-management
+key_name = Your Name Here
+key_binance = YOUR_BINANCE_API_KEY_HERE
+secret_binance = YOUR_BINANCE_SECRET_KEY_HERE
+
+# Telegram Bot Configuration
+# Tạo bot: https://t.me/BotFather
+bot_token = YOUR_TELEGRAM_BOT_TOKEN_HERE
+chat_id = YOUR_TELEGRAM_CHAT_ID_HERE
+
+# Google Sheets Configuration
+# Lấy từ URL Google Sheets
+# https://docs.google.com/spreadsheets/d/[SPREADSHEET_ID]/edit
+spreadsheet_id = YOUR_GOOGLE_SPREADSHEET_ID_HERE
+
+# Sheet Tab Name (phải khớp với tên tab trong Google Sheets)
+tab_dat_lenh = ĐẶT LỆNH (100 MÃ)
+
+# Strategy Rates (Tỷ lệ chiến lược)
+# lenh2_rate: Khoảng cách Stop Loss (% of leverage)
+# lenh3_rate: Khoảng cách Take Profit (% of leverage)
+lenh2_rate_long = 1.0
+lenh2_rate_short = 1.0
+lenh3_rate_long = 0.4
+lenh3_rate_short = 0.4
+lenh3_callback_rate = 1.0
+
+# Module Delays (seconds)
+# Thời gian chờ giữa các lần scan
+delay_vao_lenh = 20                           # hd_order.py
+delay_vao_lenh_123 = 60                       # hd_order_123.py
+delay_cho_va_khop = 20                        # hd_update_cho_va_khop.py
+delay_update_price = 25                       # hd_update_price.py
+delay_update_all = 0                          # hd_update_all.py (continuous)
+delay_calert_possition_and_open_order = 10    # hd_alert_*.py
+
+# Cancel Schedule (minutes)
+cancel_orders_minutes = 1
+
+# Other Settings
+is_print_mode = false
+top_count = 50
+max_increase_decrease_4h_day_count = 60
+
+# ⚠️ IMPORTANT: Test Mode
+# true = Không đặt lệnh thật (chỉ in ra)
+# false = Đặt lệnh thật vào Binance
+test_mode = true
+
