@@ -418,7 +418,7 @@ def do_it():
         
         price = tickers[symbol]['last']
 
-        print(symbol, tickers[symbol]['percentage'], price)
+        print(symbol, tickers[symbol]['percentage'], price, flush=True)
         pair= symbol.replace(":USDT", "")
         row = [pair, tickers[symbol]['percentage'], price]
         
@@ -588,7 +588,7 @@ def do_it():
     
     # Lấy Funding Rate
     funding_rate = data_collector.get_funding_rate("BTC/USDT")
-    print(f"Funding Rate: {funding_rate}%")
+    print(f"Funding Rate: {funding_rate}%", flush=True)
 
     
     
@@ -607,7 +607,7 @@ def do_it():
         row_data.append(bd[5])
         list_them_2d_arr.append(row_data)
 
-    print(list_them_2d_arr)
+    print(list_them_2d_arr, flush=True)
     
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, 1, list_them_2d_arr, "N")
 
@@ -655,7 +655,7 @@ def do_it():
     # Ghi header từ B1 trở đi
     print("Ghi header từ B1 trở đi...", flush=True)
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, -1, [header_row], "B")
-    print(tab_100_ma_2d_arr)
+    print(f"Tổng số dòng dữ liệu: {len(tab_100_ma_2d_arr)}", flush=True)
     
     # Fix: Ghi data từ hàng 2 (array_index = 0 để ghi từ hàng 2)
     # Header đã ở hàng 1, data bắt đầu từ hàng 2
@@ -685,7 +685,9 @@ while True:
         
 
     except Exception as e:
-        print("Tổng Lỗi:", e)
+        print(f"Tổng Lỗi: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
         logging.error("Tổng lỗi: %s", str(e))
 
     if is_test_mode:
