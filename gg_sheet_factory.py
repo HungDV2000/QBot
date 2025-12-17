@@ -180,7 +180,8 @@ def update_multi(tab_name, array_index, array_2d, from_column_alphabet_name):
   else:
       index = 2 + array_index
   
-  RANGE_NAME = f"'{tab_name}'!{from_column_alphabet_name}{index}:Z1000"
+  # Fix: Mở rộng range đến cột AZ để đủ chứa tất cả data (52 cột)
+  RANGE_NAME = f"'{tab_name}'!{from_column_alphabet_name}{index}:AZ1000"
   
   
   print("----------------------------")
@@ -208,7 +209,7 @@ def update_multi(tab_name, array_index, array_2d, from_column_alphabet_name):
       print(f"An error occurred: {error}")
       return error
 
-def clear_multi(tab_name, array_index,  from_column_alphabet_name, end_row=1000, end_column="Z"):
+def clear_multi(tab_name, array_index,  from_column_alphabet_name, end_row=1000, end_column="AZ"):
   """
   Clear dữ liệu trong sheet
   Args:
@@ -216,7 +217,7 @@ def clear_multi(tab_name, array_index,  from_column_alphabet_name, end_row=1000,
     array_index: Index (sẽ được convert thành row = 2 + array_index, hoặc nếu < 0 thì dùng abs)
     from_column_alphabet_name: Cột bắt đầu (VD: "A")
     end_row: Hàng kết thúc (default: 1000)
-    end_column: Cột kết thúc (default: "Z")
+    end_column: Cột kết thúc (default: "AZ")
   """
   # Fix: Nếu array_index < 0, dùng abs để clear từ hàng đó trực tiếp
   # Nếu array_index >= 0, dùng công thức 2 + array_index (giữ backward compatibility)
