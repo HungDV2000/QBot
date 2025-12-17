@@ -369,7 +369,7 @@ def get_volumes(symbol):
     
 
 def do_it():
-    print(f"-------------------------------start scan all: {datetime.now()}-------------------------------------")
+    print(f"-------------------------------start scan all: {datetime.now()}-------------------------------------", flush=True)
     start_time = time.time()
 
     # Fix: Khởi tạo data_collector ngay đầu hàm
@@ -381,8 +381,8 @@ def do_it():
     
 
     white_list = set(gg_sheet_factory.get_white_list())
-    print(f"Danh sách whitelist từ sheet (tổng {len(white_list)} mã):")
-    print(white_list)
+    print(f"Danh sách whitelist từ sheet (tổng {len(white_list)} mã):", flush=True)
+    print(white_list, flush=True)
     
     # Fix: Lọc chỉ lấy các mã có trong whitelist VÀ đang được giao dịch trên Binance
     futures_symbols=  [
@@ -393,7 +393,7 @@ def do_it():
         and symbol in white_list  # Chỉ lấy mã có trong whitelist
     ]
     
-    print(f"Số mã sau khi lọc whitelist: {len(futures_symbols)}")
+    print(f"Số mã sau khi lọc whitelist: {len(futures_symbols)}", flush=True)
 
     
 
@@ -534,14 +534,14 @@ def do_it():
     list_tang_nhieu_nhat = sorted(futures_symbols, reverse=True, key=lambda x: tickers[x]['percentage'])[0:cst.top_count]
 
     # Fix: Tính Top 50 gần đỉnh/đáy TRƯỚC khi gọi get_row_result()
-    print("Đang tìm Top 50 mã gần đỉnh/đáy...")
+    print("Đang tìm Top 50 mã gần đỉnh/đáy...", flush=True)
     all_symbols = list_giam_nhieu_nhat + list_tang_nhieu_nhat + list_them
     top_50_near_high, top_50_near_low = data_collector.find_top_50_near_extremes(
         [s.replace(":USDT", "") for s in all_symbols],
         period_days=30
     )
-    print(f"✅ Top 50 gần đỉnh: {len(top_50_near_high)} mã")
-    print(f"✅ Top 50 gần đáy: {len(top_50_near_low)} mã")
+    print(f"✅ Top 50 gần đỉnh: {len(top_50_near_high)} mã", flush=True)
+    print(f"✅ Top 50 gần đáy: {len(top_50_near_low)} mã", flush=True)
 
     list_all = []
     
@@ -646,7 +646,7 @@ def do_it():
 
     end_time = time.time()
     execution_time = end_time - start_time
-    print("Thời gian thực thi:", execution_time, "giây")
+    print("Thời gian thực thi:", execution_time, "giây", flush=True)
  
 
 gg_sheet_factory.init_sheet_api()
