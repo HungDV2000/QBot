@@ -380,14 +380,20 @@ def do_it():
     
     
 
-    white_list = set(gg_sheet_factory.get_white_list())  
+    white_list = set(gg_sheet_factory.get_white_list())
+    print(f"Danh sách whitelist từ sheet (tổng {len(white_list)} mã):")
+    print(white_list)
+    
+    # Fix: Lọc chỉ lấy các mã có trong whitelist VÀ đang được giao dịch trên Binance
     futures_symbols=  [
         symbol for symbol in tickers.keys()
         if '/USDT' in symbol 
         and "-" not in symbol
         and tickers[symbol].get('percentage') is not None
-        and symbol in white_list  
+        and symbol in white_list  # Chỉ lấy mã có trong whitelist
     ]
+    
+    print(f"Số mã sau khi lọc whitelist: {len(futures_symbols)}")
 
     
 

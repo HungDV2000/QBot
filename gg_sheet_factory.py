@@ -103,10 +103,21 @@ def get_white_list():
             .execute()
         )
         rows = result.get("values", [])
-        return [
-            (row[0].upper() + ":USDT") if row[0].upper().endswith("/USDT") else row[0].upper()
-            for row in rows if row
-        ]
+        whitelist = []
+        for row in rows:
+            if not row or not row[0].strip():
+                continue
+            symbol = row[0].strip().upper()
+            # Fix: Chuyển đổi format đúng
+            # Từ sheet: "BTC/USDT" → "BTC/USDT:USDT" (format Binance futures)
+            if symbol.endswith("/USDT"):
+                whitelist.append(symbol + ":USDT")
+            elif not symbol.endswith(":USDT"):
+                # Nếu chỉ có tên mã (không có /USDT), thêm /USDT:USDT
+                whitelist.append(symbol + "/USDT:USDT")
+            else:
+                whitelist.append(symbol)
+        return whitelist
     except HttpError as error:
         print(f"An error occurred: {error}")
         return []
