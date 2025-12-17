@@ -193,13 +193,57 @@ class DataCollector:
             logger.error(f"Lỗi tính max change {symbol} {timeframe}: {e}")
             return 0.0, 0.0
     
+    def get_high_low_simple(
+        self,
+        symbol: str,
+        days: int
+    ) -> Tuple[float, int, float, int]:
+        """
+        Lấy giá cao/thấp nhất trong N ngày (ĐƠN GIẢN - chỉ 1 API call)
+        
+        Args:
+            symbol: Cặp giao dịch
+            days: Số ngày (3, 7, 30)
+            
+        Returns:
+            Tuple (high_price, 0, low_price, 0) - timestamp để 0
+        """
+        try:
+            # Chỉ lấy dữ liệu 1 ngày - KHÔNG cần fetch 1m
+            now = self.exchange.milliseconds()
+            start_time = now - (days * 24 * 60 * 60 * 1000)
+            
+            ohlcv_daily = self.exchange.fetch_ohlcv(
+                symbol, 
+                timeframe='1d', 
+                since=start_time, 
+                limit=days + 1
+            )
+            
+            if not ohlcv_daily:
+                return 0.0, 0, 0.0, 0
+            
+            # Tìm high/low cao/thấp nhất
+            df_daily = pd.DataFrame(ohlcv_daily, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            
+            high_price = df_daily['high'].max()
+            low_price = df_daily['low'].min()
+            
+            logger.debug(f"High/Low {symbol} {days}d: High={high_price}, Low={low_price}")
+            return float(high_price), 0, float(low_price), 0
+            
+        except Exception as e:
+            logger.error(f"Lỗi lấy high/low {symbol} {days}d: {e}")
+            return 0.0, 0, 0.0, 0
+    
     def get_high_low_with_timestamp(
         self,
         symbol: str,
         days: int
     ) -> Tuple[float, int, float, int]:
         """
-        Lấy giá cao/thấp nhất và timestamp trong N ngày
+        Lấy giá cao/thấp nhất và timestamp trong N ngày (CHI TIẾT - 3 API calls)
+        KHÔNG khuyến khích dùng cho nhiều symbols (quá chậm)
         
         Args:
             symbol: Cặp giao dịch
