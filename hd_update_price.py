@@ -40,8 +40,28 @@ def do_it():
     print(f"-------------------------------start scan giá: {datetime.now()}-------------------------------------")
     start_time = time.time()
 
+    # Fix: Thêm retry logic cho fetch_tickers()
+    max_retries = 3
+    retry_delay = 5
+    tickers = None
     
-    tickers = exchange.fetch_tickers()
+    for attempt in range(max_retries):
+        try:
+            tickers = exchange.fetch_tickers()
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Lỗi khi fetch_tickers (lần thử {attempt + 1}/{max_retries}): {e}")
+                print(f"Đợi {retry_delay} giây trước khi thử lại...")
+                time.sleep(retry_delay)
+            else:
+                print(f"Lỗi fetch_tickers sau {max_retries} lần thử: {e}")
+                logging.error(f"Lỗi fetch_tickers: {e}")
+                raise
+    
+    if tickers is None:
+        print("Không thể lấy dữ liệu tickers, bỏ qua lần này")
+        return
 
     
     

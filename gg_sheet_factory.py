@@ -173,7 +173,12 @@ def replace_nan(array, replace_value):
     return array
 
 def update_multi(tab_name, array_index, array_2d, from_column_alphabet_name):
-  index = 2 + array_index
+  # Fix: Nếu array_index < 0, dùng abs để ghi từ hàng đó trực tiếp
+  # Nếu array_index >= 0, dùng công thức 2 + array_index (giữ backward compatibility)
+  if array_index < 0:
+      index = abs(array_index)
+  else:
+      index = 2 + array_index
   
   RANGE_NAME = f"'{tab_name}'!{from_column_alphabet_name}{index}:Z1000"
   
@@ -203,11 +208,25 @@ def update_multi(tab_name, array_index, array_2d, from_column_alphabet_name):
       print(f"An error occurred: {error}")
       return error
 
-def clear_multi(tab_name, array_index,  from_column_alphabet_name):
-  index = 2 + array_index
+def clear_multi(tab_name, array_index,  from_column_alphabet_name, end_row=1000, end_column="Z"):
+  """
+  Clear dữ liệu trong sheet
+  Args:
+    tab_name: Tên tab
+    array_index: Index (sẽ được convert thành row = 2 + array_index, hoặc nếu < 0 thì dùng abs)
+    from_column_alphabet_name: Cột bắt đầu (VD: "A")
+    end_row: Hàng kết thúc (default: 1000)
+    end_column: Cột kết thúc (default: "Z")
+  """
+  # Fix: Nếu array_index < 0, dùng abs để clear từ hàng đó trực tiếp
+  # Nếu array_index >= 0, dùng công thức 2 + array_index (giữ backward compatibility)
+  if array_index < 0:
+      index = abs(array_index)
+  else:
+      index = 2 + array_index
   
-  RANGE_NAME = f"'{tab_name}'!{from_column_alphabet_name}{index}:Z1000"
-  print("----------------------------")
+  RANGE_NAME = f"'{tab_name}'!{from_column_alphabet_name}{index}:{end_column}{end_row}"
+  print(f"Clear range: {RANGE_NAME}")
   init_sheet_api()
 
   try:

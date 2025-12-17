@@ -118,21 +118,21 @@ class PriceTracker:
                 price_data = data_collector.get_30_recent_prices(symbol)
                 
                 if price_data:
-                    # Chuẩn bị dữ liệu để ghi vào sheet
-                    # Giả sử cột H trở đi dùng để lưu 30 mức giá
-                    # H = price 1, I = price 2, ..., AK = price 30 (30 cột)
+                    # Fix: Chỉ track 19 giá (H đến Z = 19 cột) thay vì 30
+                    # H = price 1, I = price 2, ..., Z = price 19
+                    # Vì update_multi chỉ hỗ trợ đến cột Z
                     
-                    prices_only = [p['price'] for p in price_data[-30:]]  # Lấy tối đa 30 giá gần nhất
+                    prices_only = [p['price'] for p in price_data[-19:]]  # Lấy tối đa 19 giá gần nhất
                     
-                    # Pad nếu không đủ 30
-                    while len(prices_only) < 30:
+                    # Pad nếu không đủ 19
+                    while len(prices_only) < 19:
                         prices_only.insert(0, "")
                     
-                    # Update vào sheet (cột H:AK tương ứng 30 prices)
+                    # Update vào sheet (cột H:Z tương ứng 19 prices)
                     # Sử dụng update_multi với array_index là row_num
                     gg_sheet_factory.update_multi(
                         gg_sheet_factory.tab_dat_lenh,
-                        row_num,
+                        row_num - 2,  # Fix: array_index = row_num - 2 (vì update_multi dùng index = 2 + array_index)
                         [prices_only],
                         "H"  # Bắt đầu từ cột H
                     )

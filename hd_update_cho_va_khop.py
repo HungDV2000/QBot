@@ -1,11 +1,9 @@
 import ccxt
 import cst
 import gg_sheet_factory
-import cst
 import logging
 import time
 from datetime import datetime
-import utils
 import os
 
 file_name = os.path.basename(os.path.abspath(__file__))  
@@ -20,7 +18,8 @@ exchange = exchange_class({
     'apiKey': cst.key_binance,
     'secret': cst.secret_binance,
     'options': {
-        'defaultType': 'future' 
+        'defaultType': 'future',
+        'warnOnFetchOpenOrdersWithoutSymbol': False  # Fix: Suppress warning về rate limits
     }
 })
 exchange.setSandboxMode(False)
@@ -28,18 +27,39 @@ exchange.setSandboxMode(False)
 
 
 def get_all_open_orders_with_single_order():
+    """
+    Lấy tất cả orders có đúng 1 order pending cho mỗi symbol
+    Thay đổi: Lấy trực tiếp từ Binance API thay vì từ thư mục local
+    """
     res = []
     
-    for sym in  utils.get_all_open_orders_symbol_local():
-        print(sym)
+    try:
+        # Fix: Lấy TẤT CẢ open orders từ Binance (không cần biết symbols trước)
+        # Không truyền symbol = lấy tất cả orders của tất cả symbols
+        all_orders = exchange.fetch_open_orders()
         
+        print(f"Tổng số orders từ Binance: {len(all_orders)}")
         
-        orders = exchange.fetch_open_orders(symbol=sym)
-        if len(orders) == 1:
-            res.append(orders[0])
+        # Nhóm orders theo symbol
+        orders_by_symbol = {}
+        for order in all_orders:
+            symbol = order['symbol']
+            if symbol not in orders_by_symbol:
+                orders_by_symbol[symbol] = []
+            orders_by_symbol[symbol].append(order)
         
-        for order in orders:
-            print(f"Symbol: {order['symbol']}, ID: {order['id']}, Status: {order['status']}, Amount: {order['amount']}, Price: {order['price']}")
+        # Chỉ lấy symbols có đúng 1 order
+        for symbol, orders in orders_by_symbol.items():
+            if len(orders) == 1:
+                res.append(orders[0])
+                print(f"Symbol: {symbol}, ID: {orders[0]['id']}, Status: {orders[0]['status']}, Amount: {orders[0]['amount']}, Price: {orders[0].get('price', 'N/A')}")
+        
+        print(f"Tìm thấy {len(res)} symbols có đúng 1 order")
+        
+    except Exception as e:
+        print(f"Lỗi khi lấy orders từ Binance: {e}")
+        logging.error(f"Lỗi get_all_open_orders_with_single_order: {e}")
+    
     return res
 
 def get_opened_possition():
@@ -52,9 +72,10 @@ def get_opened_possition():
         
         symbol = position['symbol']
         position_amt = float(position['positionAmt'])
-        entry_price = float(position['entryPrice'])
-        unrealized_pnl = float(position['unrealizedProfit'])
-        leverage = int(position['leverage'])
+        # Fix: Kiểm tra key 'entryPrice' tồn tại trước khi dùng
+        entry_price = float(position.get('entryPrice', 0)) if position.get('entryPrice') else 0.0
+        unrealized_pnl = float(position.get('unrealizedProfit', 0)) if position.get('unrealizedProfit') else 0.0
+        leverage = int(position.get('leverage', 1)) if position.get('leverage') else 1
         if position_amt != 0:
             print(position)
             opened_possition.append(position)
@@ -75,8 +96,9 @@ def do_it():
         vi_the_short_long = 'LONG' if  position_amt > 0 else 'SHORT' if position_amt < 0 else 'Flat'
         cho_khop = "N"
         da_khop_mo_vi_the = "Y"
-        gia_vao = position['entryPrice']
-        don_bay = position['leverage']
+        # Fix: Kiểm tra key tồn tại trước khi dùng
+        gia_vao = position.get('entryPrice', 0) if position.get('entryPrice') else 0.0
+        don_bay = position.get('leverage', 1) if position.get('leverage') else 1
         
         orders = exchange.fetch_open_orders(symbol=cac_ma)
         
@@ -121,7 +143,18 @@ def do_it():
         row  = cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2
         tab_100_ma_2d_arr.append(row)
 
-    gg_sheet_factory.clear_multi(gg_sheet_factory.tab_cho_va_khop,2, "a")
+    # Fix: Clear dữ liệu cũ và thêm timestamp
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Clear từ hàng 2 trở đi (giữ header ở hàng 1)
+    gg_sheet_factory.clear_multi(gg_sheet_factory.tab_cho_va_khop, 2, "a")
+    
+    # Thêm timestamp vào đầu
+    if tab_100_ma_2d_arr:
+        # Thêm timestamp vào hàng đầu tiên của data
+        tab_100_ma_2d_arr = [[current_time] + [""] * (len(tab_100_ma_2d_arr[0]) - 1) if tab_100_ma_2d_arr else [current_time]] + tab_100_ma_2d_arr
+    
+    # Update dữ liệu mới (thay thế, không append)
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_cho_va_khop, 2, tab_100_ma_2d_arr, "a")
 
 while True:

@@ -372,6 +372,8 @@ def do_it():
     print(f"-------------------------------start scan all: {datetime.now()}-------------------------------------")
     start_time = time.time()
 
+    # Fix: Khởi tạo data_collector ngay đầu hàm
+    data_collector = get_data_collector(exchange)
     
     tickers = exchange.fetch_tickers()
 
@@ -493,7 +495,7 @@ def do_it():
             row.extend([high_30d, utils.convert_unix_timestamp(high_30d_ts) if high_30d_ts > 0 else ""])
             row.extend([low_30d, utils.convert_unix_timestamp(low_30d_ts) if low_30d_ts > 0 else ""])
         except Exception as e:
-            logger.error(f"Lỗi lấy high/low với timestamp cho {pair}: {e}")
+            logging.error(f"Lỗi lấy high/low với timestamp cho {pair}: {e}")
             # Thêm 12 cột trống (3 periods * 4 values)
             row.extend([""] * 12)
 
@@ -524,6 +526,16 @@ def do_it():
     
     list_giam_nhieu_nhat = sorted(futures_symbols, key=lambda x: tickers[x]['percentage'])[:cst.top_count]
     list_tang_nhieu_nhat = sorted(futures_symbols, reverse=True, key=lambda x: tickers[x]['percentage'])[0:cst.top_count]
+
+    # Fix: Tính Top 50 gần đỉnh/đáy TRƯỚC khi gọi get_row_result()
+    print("Đang tìm Top 50 mã gần đỉnh/đáy...")
+    all_symbols = list_giam_nhieu_nhat + list_tang_nhieu_nhat + list_them
+    top_50_near_high, top_50_near_low = data_collector.find_top_50_near_extremes(
+        [s.replace(":USDT", "") for s in all_symbols],
+        period_days=30
+    )
+    print(f"✅ Top 50 gần đỉnh: {len(top_50_near_high)} mã")
+    print(f"✅ Top 50 gần đáy: {len(top_50_near_low)} mã")
 
     list_all = []
     
@@ -564,10 +576,7 @@ def do_it():
     for symbol in list_them:
         tab_100_ma_2d_arr =  [get_row_result(symbol)]  + tab_100_ma_2d_arr
 
-    # Khởi tạo data collector
-    data_collector = get_data_collector(exchange)
-    
-    # Lấy thông tin tài khoản
+    # Lấy thông tin tài khoản (data_collector đã được khởi tạo ở đầu hàm)
     balance = exchange.fetch_balance()
     totalMarginBalance= round(float(balance["info"]["totalMarginBalance"]),4)
     totalCrossUnPnl= round(float(balance["info"]["totalCrossUnPnl"]),4)
@@ -575,17 +584,7 @@ def do_it():
     
     # Lấy Funding Rate
     funding_rate = data_collector.get_funding_rate("BTC/USDT")
-    logger.info(f"Funding Rate: {funding_rate}%")
-    
-    # Tìm Top 50 mã gần đỉnh/đáy 30 ngày
-    logger.info("Đang tìm Top 50 mã gần đỉnh/đáy...")
-    all_symbols = list_giam_nhieu_nhat + list_tang_nhieu_nhat + list_them
-    top_50_near_high, top_50_near_low = data_collector.find_top_50_near_extremes(
-        [s.replace(":USDT", "") for s in all_symbols],
-        period_days=30
-    )
-    logger.info(f"✅ Top 50 gần đỉnh: {len(top_50_near_high)} mã")
-    logger.info(f"✅ Top 50 gần đáy: {len(top_50_near_low)} mã")
+    print(f"Funding Rate: {funding_rate}%")
 
     
     
@@ -615,11 +614,18 @@ def do_it():
     # Hàng 2: Funding Rate | Margin Balance | Wallet Balance | Unrealized PNL
     tab_100_ma_2d_arr = [[funding_rate, totalMarginBalance,  totalWalletBalance, totalCrossUnPnl]]  + tab_100_ma_2d_arr
 
+    # Fix: Clear dữ liệu cũ trước khi ghi mới (từ hàng 1 trở đi, giữ header nếu có)
+    # Clear từ hàng 1 đến hàng 1000 (đủ lớn để xóa tất cả data cũ)
+    # array_index = -1 để clear từ hàng 1 (vì index = 2 + array_index, nếu array_index = -1 thì index = 1)
+    gg_sheet_factory.clear_multi(gg_sheet_factory.tab_list_all_ma, -1, "A", end_row=1000)
+    
     # Hàng 1: Thời gian cập nhật
     current_time = datetime.now()
     time_string = current_time.strftime("%Y-%m-%d %H:%M:%S")
     tab_100_ma_2d_arr = [[time_string]]  + tab_100_ma_2d_arr
     print(tab_100_ma_2d_arr)
+    # Fix: Ghi từ hàng 1 (thay thế, không append)
+    # array_index = -1 để ghi từ hàng 1 (vì update_multi dùng index = 2 + array_index)
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, -1, tab_100_ma_2d_arr, "A")
 
     
