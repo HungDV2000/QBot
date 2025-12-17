@@ -146,15 +146,21 @@ def do_it():
     # Fix: Clear dữ liệu cũ và thêm timestamp
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Clear từ hàng 2 trở đi (giữ header ở hàng 1)
-    gg_sheet_factory.clear_multi(gg_sheet_factory.tab_cho_va_khop, 2, "a")
+    # Fix: Clear từ hàng 2 trở đi (giữ header ở hàng 1)
+    # array_index = 0 để clear từ hàng 2 (vì index = 2 + 0 = 2)
+    gg_sheet_factory.clear_multi(gg_sheet_factory.tab_cho_va_khop, 0, "a", end_row=1000)
     
-    # Thêm timestamp vào đầu
+    # Fix: Ghi timestamp vào A4 trước (riêng biệt để đảm bảo được cập nhật)
+    print(f"Cập nhật timestamp vào A4: {current_time}")
+    gg_sheet_factory.update_single_value(gg_sheet_factory.tab_cho_va_khop, "A4", current_time)
+    
+    # Thêm timestamp vào đầu array
     if tab_100_ma_2d_arr:
         # Thêm timestamp vào hàng đầu tiên của data
         tab_100_ma_2d_arr = [[current_time] + [""] * (len(tab_100_ma_2d_arr[0]) - 1) if tab_100_ma_2d_arr else [current_time]] + tab_100_ma_2d_arr
     
-    # Update dữ liệu mới (thay thế, không append)
+    # Fix: Update dữ liệu mới từ hàng 4 (thay thế, không append)
+    # array_index = 2 để update từ hàng 4 (vì index = 2 + 2 = 4)
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_cho_va_khop, 2, tab_100_ma_2d_arr, "a")
 
 while True:

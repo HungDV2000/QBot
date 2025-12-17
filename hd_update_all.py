@@ -614,18 +614,26 @@ def do_it():
     # Hàng 2: Funding Rate | Margin Balance | Wallet Balance | Unrealized PNL
     tab_100_ma_2d_arr = [[funding_rate, totalMarginBalance,  totalWalletBalance, totalCrossUnPnl]]  + tab_100_ma_2d_arr
 
-    # Fix: Clear dữ liệu cũ trước khi ghi mới (từ hàng 1 trở đi, giữ header nếu có)
+    # Fix: Clear dữ liệu cũ trước khi ghi mới (từ hàng 1 trở đi)
     # Clear từ hàng 1 đến hàng 1000 (đủ lớn để xóa tất cả data cũ)
-    # array_index = -1 để clear từ hàng 1 (vì index = 2 + array_index, nếu array_index = -1 thì index = 1)
+    # array_index = -1 để clear từ hàng 1 (vì trong clear_multi: nếu array_index < 0 thì index = abs(array_index) = 1)
     gg_sheet_factory.clear_multi(gg_sheet_factory.tab_list_all_ma, -1, "A", end_row=1000)
     
-    # Hàng 1: Thời gian cập nhật
+    # Hàng 1: Thời gian cập nhật (A1)
     current_time = datetime.now()
     time_string = current_time.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Fix: Đảm bảo timestamp được ghi vào A1 trước (riêng biệt để chắc chắn được cập nhật)
+    print(f"Cập nhật timestamp vào A1: {time_string}")
+    gg_sheet_factory.update_single_value(gg_sheet_factory.tab_list_all_ma, "A1", time_string)
+    
+    # Thêm timestamp vào đầu array để data có timestamp ở hàng đầu tiên
     tab_100_ma_2d_arr = [[time_string]]  + tab_100_ma_2d_arr
     print(tab_100_ma_2d_arr)
-    # Fix: Ghi từ hàng 1 (thay thế, không append)
-    # array_index = -1 để ghi từ hàng 1 (vì update_multi dùng index = 2 + array_index)
+    
+    # Fix: Ghi data từ hàng 1 (array_index = -1 để ghi từ hàng 1)
+    # array_index = -1 → index = abs(-1) = 1 → ghi từ hàng 1
+    # Timestamp đã được ghi vào A1 ở trên, và cũng có trong array đầu tiên
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, -1, tab_100_ma_2d_arr, "A")
 
     
