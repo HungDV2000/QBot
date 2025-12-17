@@ -484,24 +484,22 @@ def do_it():
         row.append(high)
         row.append(low)
         
-        # Giá cao/thấp 3, 7, 30 ngày với timestamp
+        # Fix: Đơn giản hóa - chỉ lấy high/low (không cần timestamp phút)
+        # Giảm từ 900 API calls → 300 API calls cho 100 symbols
         try:
-            # 3 ngày
-            high_3d, high_3d_ts, low_3d, low_3d_ts = data_collector.get_high_low_with_timestamp(pair, 3)
-            row.extend([high_3d, utils.convert_unix_timestamp(high_3d_ts) if high_3d_ts > 0 else ""])
-            row.extend([low_3d, utils.convert_unix_timestamp(low_3d_ts) if low_3d_ts > 0 else ""])
+            # 3 ngày - chỉ lấy high/low
+            high_3d, _, low_3d, _ = data_collector.get_high_low_simple(pair, 3)
+            row.extend([high_3d, "", low_3d, ""])  # Cột Z, AA, AB, AC
             
             # 7 ngày
-            high_7d, high_7d_ts, low_7d, low_7d_ts = data_collector.get_high_low_with_timestamp(pair, 7)
-            row.extend([high_7d, utils.convert_unix_timestamp(high_7d_ts) if high_7d_ts > 0 else ""])
-            row.extend([low_7d, utils.convert_unix_timestamp(low_7d_ts) if low_7d_ts > 0 else ""])
+            high_7d, _, low_7d, _ = data_collector.get_high_low_simple(pair, 7)
+            row.extend([high_7d, "", low_7d, ""])  # Cột AD, AE, AF, AG
             
-            # 30 ngày (thêm timestamp)
-            high_30d, high_30d_ts, low_30d, low_30d_ts = data_collector.get_high_low_with_timestamp(pair, 30)
-            row.extend([high_30d, utils.convert_unix_timestamp(high_30d_ts) if high_30d_ts > 0 else ""])
-            row.extend([low_30d, utils.convert_unix_timestamp(low_30d_ts) if low_30d_ts > 0 else ""])
+            # 30 ngày
+            high_30d, _, low_30d, _ = data_collector.get_high_low_simple(pair, 30)
+            row.extend([high_30d, "", low_30d, ""])  # Cột AH, AI, AJ, AK
         except Exception as e:
-            logging.error(f"Lỗi lấy high/low với timestamp cho {pair}: {e}")
+            logging.error(f"Lỗi lấy high/low cho {pair}: {e}", flush=True)
             # Thêm 12 cột trống (3 periods * 4 values)
             row.extend([""] * 12)
 
@@ -621,26 +619,47 @@ def do_it():
     tab_100_ma_2d_arr = [[funding_rate, totalMarginBalance,  totalWalletBalance, totalCrossUnPnl]]  + tab_100_ma_2d_arr
 
     # Fix: Clear dữ liệu cũ trước khi ghi mới (từ hàng 1 trở đi)
-    # Clear từ hàng 1 đến hàng 1000 (đủ lớn để xóa tất cả data cũ)
-    # array_index = -1 để clear từ hàng 1 (vì trong clear_multi: nếu array_index < 0 thì index = abs(array_index) = 1)
+    # Clear từ hàng 1 đến hàng 1000
+    # array_index = -1 để clear từ hàng 1 (vì index = abs(-1) = 1)
     gg_sheet_factory.clear_multi(gg_sheet_factory.tab_list_all_ma, -1, "A", end_row=1000)
     
-    # Hàng 1: Thời gian cập nhật (A1)
+    # Lấy timestamp hiện tại
     current_time = datetime.now()
     time_string = current_time.strftime("%Y-%m-%d %H:%M:%S")
     
-    # Fix: Đảm bảo timestamp được ghi vào A1 trước (riêng biệt để chắc chắn được cập nhật)
-    print(f"Cập nhật timestamp vào A1: {time_string}")
+    # Ghi timestamp vào A1 (không có header)
+    print("Ghi timestamp vào A1...", flush=True)
     gg_sheet_factory.update_single_value(gg_sheet_factory.tab_list_all_ma, "A1", time_string)
     
-    # Thêm timestamp vào đầu array để data có timestamp ở hàng đầu tiên
-    tab_100_ma_2d_arr = [[time_string]]  + tab_100_ma_2d_arr
+    # Header từ B1 trở đi (tên tiếng Việt)
+    header_row = [
+        "% 24h",                        # B: Percentage 24h
+        "Giá trị hiện thời",           # C: Price
+        "Niêm yết",                     # D: Listing time
+        "Vol 15p", "Vol 1h", "Vol 4h", "Vol 1 ngày", "Vol 1 tuần",  # E-I: Volume
+        "BB15p trên", "BB15p dưới",     # J-K: BB 15m
+        "BB1h trên", "BB1h dưới",       # L-M: BB 1h
+        "BB4h trên", "BB4h dưới",       # N-O: BB 4h
+        "BB1 ngày trên", "BB1 ngày dưới",  # P-Q: BB 1d
+        "BB1 tuần trên", "BB1 tuần dưới",  # R-S: BB 1w
+        "BB1 tháng trên", "BB1 tháng dưới",  # T-U: BB 1M
+        "Biên độ 1h max tăng tuần", "Biên độ 1h max giảm tuần",  # V-W: Max inc/dec 7d
+        "Max 30 ngày", "Min 30 ngày",   # X-Y: High/Low 30d
+        "Max 3 ngày", "Thời điểm Max 3 ngày", "Min 3 ngày", "Thời điểm Min 3 ngày",  # Z-AC: High/Low 3d
+        "Max 7 ngày", "Thời điểm Max 7 ngày", "Min 7 ngày", "Thời điểm Min 7 ngày",  # AD-AG: High/Low 7d
+        "Max 30 ngày chi tiết", "Thời điểm Max 30 ngày", "Min 30 ngày chi tiết", "Thời điểm Min 30 ngày",  # AH-AK: High/Low 30d chi tiết
+        "Max tăng 4h/60 ngày", "Max giảm 4h/60 ngày",  # AL-AM: Inc/Dec 4h
+        "Đánh dấu"                      # AN: Marker
+    ]
+    
+    # Ghi header từ B1 trở đi
+    print("Ghi header từ B1 trở đi...", flush=True)
+    gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, -1, [header_row], "B")
     print(tab_100_ma_2d_arr)
     
-    # Fix: Ghi data từ hàng 1 (array_index = -1 để ghi từ hàng 1)
-    # array_index = -1 → index = abs(-1) = 1 → ghi từ hàng 1
-    # Timestamp đã được ghi vào A1 ở trên, và cũng có trong array đầu tiên
-    gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, -1, tab_100_ma_2d_arr, "A")
+    # Fix: Ghi data từ hàng 2 (array_index = 0 để ghi từ hàng 2)
+    # Header đã ở hàng 1, data bắt đầu từ hàng 2
+    gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, 0, tab_100_ma_2d_arr, "A")
 
     
 
