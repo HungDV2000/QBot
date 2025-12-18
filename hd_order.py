@@ -73,26 +73,44 @@ def cancel_all_open_orders(symbol):
 
 
 
-def is_opened_order_1(sym):
-    
-    balance = exchange.fetch_balance()
-    positions = balance['info']['positions']
-    for position in positions:
-        
-        symbol = position['symbol']
-        if(is_same_pair(symbol,sym) and float(position['positionAmt']) !=0):
-            print(position)
-            return True
-    
-    orders = exchange.fetch_open_orders(symbol=sym)
-    
-    
-    
+def has_position(sym):
+    """Kiểm tra symbol đã có vị thế (đã vào lệnh) chưa"""
+    try:
+        balance = exchange.fetch_balance()
+        positions = balance['info']['positions']
+        for position in positions:
+            symbol = position['symbol']
+            if is_same_pair(symbol, sym) and float(position['positionAmt']) != 0:
+                return True
+        return False
+    except Exception as e:
+        logger.error(f"Lỗi khi kiểm tra vị thế cho {sym}: {e}", exc_info=True)
+        return False
 
-    if(len(orders)>0):
-        return True
-  
-    return False
+def cancel_existing_trailing_stop_orders(symbol):
+    """Hủy tất cả order TRAILING_STOP cũ của symbol trước khi tạo order mới"""
+    try:
+        open_orders = exchange.fetch_open_orders(symbol=symbol)
+        cancelled_count = 0
+        
+        for order in open_orders:
+            # Chỉ hủy order TRAILING_STOP (Lệnh 1)
+            order_type = order.get('type', '') or order.get('info', {}).get('orderType', '')
+            if 'TRAILING_STOP' in str(order_type).upper():
+                try:
+                    order_id = order.get('id') or order.get('info', {}).get('algoId') or order.get('info', {}).get('orderId')
+                    if order_id:
+                        exchange.cancel_order(str(order_id), symbol)
+                        cancelled_count += 1
+                        logger.info(f"Đã hủy order TRAILING_STOP cũ: {symbol} - Order ID: {order_id}")
+                        print(f"🗑️  Đã hủy order TRAILING_STOP cũ cho {symbol}: {order_id}", flush=True)
+                except Exception as e:
+                    logger.warning(f"Không thể hủy order {order_id} cho {symbol}: {e}")
+        
+        return cancelled_count
+    except Exception as e:
+        logger.error(f"Lỗi khi hủy order cũ cho {symbol}: {e}", exc_info=True)
+        return 0
 
 def execute_command(commands):
     try:
@@ -296,11 +314,18 @@ def do_it():
             
             sym = str(sym).strip()
             
-            # Kiểm tra symbol đã có vị thế/lệnh chờ chưa
-            if is_opened_order_1(sym):
-                print(f"⏭️  {sym} đã có lệnh, bỏ qua", flush=True)
-                logger.info(f"{sym} Đã vào lệnh, bỏ qua")
+            # Kiểm tra symbol đã có VỊ THẾ (đã vào lệnh) chưa - nếu có thì bỏ qua
+            if has_position(sym):
+                print(f"⏭️  {sym} đã có vị thế, bỏ qua", flush=True)
+                logger.info(f"{sym} Đã có vị thế, bỏ qua")
                 continue
+            
+            # Nếu chưa có vị thế nhưng có order chờ → HỦY order cũ trước khi tạo mới
+            cancelled = cancel_existing_trailing_stop_orders(sym)
+            if cancelled > 0:
+                print(f"🧹 Đã hủy {cancelled} order TRAILING_STOP cũ của {sym}", flush=True)
+                # Chờ một chút để Binance xử lý việc hủy order
+                time.sleep(0.5)
             
             print(f"🎯 Vào lệnh 1 {state_value}: {sym} (Leverage {d[leverage_idx]}x)", flush=True)
             logger.info(f"--- Vào lệnh 1 {state_value}: {sym} TRAILING_STOP đòn bẩy: {d[leverage_idx]}")
