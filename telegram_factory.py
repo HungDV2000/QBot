@@ -59,7 +59,7 @@ def send_tele_with_limit_per_hour(msg, chat_id,is_html, show_web_preview, count_
 
             
             if sent_count >= count_mess_per_hour and current_time - last_sent_time < 3600:  
-                print("
+                # Đã vượt quá giới hạn số lượng tin nhắn trong 1 giờ
                 return 
             
             if current_time - last_sent_time >= 3600:
