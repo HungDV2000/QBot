@@ -342,13 +342,27 @@ def do_it():
             # CHỈ HỖ TRỢ TRAILING STOP (theo quy trình thực tế)
             activation_price_raw = float(str(d[activation_idx]).replace("%", ""))
             
-            # Validate activation_price > 0
+            # Validate activation_price > 0 TRƯỚC KHI làm tròn
             if activation_price_raw <= 0:
                 print(f"⚠️  {symbol}: Activation price = {activation_price_raw} (phải > 0), bỏ qua", flush=True)
                 logger.warning(f"{symbol}: Activation price = {activation_price_raw} (phải > 0), bỏ qua")
                 continue
             
-            activation_price = round(activation_price_raw, binance_utils.get_price_precision(symbol))
+            # Sử dụng exchange.price_to_precision() để làm tròn đúng theo quy tắc Binance
+            try:
+                activation_price = float(exchange.price_to_precision(symbol, activation_price_raw))
+            except Exception as e:
+                # Fallback: dùng round nếu price_to_precision lỗi
+                precision = binance_utils.get_price_precision(symbol)
+                activation_price = round(activation_price_raw, precision)
+                logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+            
+            # Validate activation_price > 0 SAU KHI làm tròn (có thể bị làm tròn thành 0 nếu quá nhỏ)
+            if activation_price <= 0:
+                print(f"⚠️  {symbol}: Activation price sau khi làm tròn = {activation_price} (phải > 0), bỏ qua. Giá gốc: {activation_price_raw}", flush=True)
+                logger.warning(f"{symbol}: Activation price sau khi làm tròn = {activation_price} (phải > 0), bỏ qua. Giá gốc: {activation_price_raw}")
+                continue
+            
             callback_rate = float(str(d[callback_idx]).replace("%", ""))
             
             print(f"📤 Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%", flush=True)
