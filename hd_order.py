@@ -17,19 +17,20 @@ from binance_order_helper import BinanceOrderHelper, cancel_all_open_orders_with
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Cải thiện logging với timestamp
+# Cải thiện logging với timestamp và UTF-8 encoding
 logging.basicConfig(
     filename='hd_order.log', 
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    encoding='utf-8'
 )
 logger = logging.getLogger(__name__)
 
 # Tạo order logger riêng để track tất cả orders
 order_logger = logging.getLogger('order')
 order_logger.setLevel(logging.INFO)
-order_handler = logging.FileHandler('order.log')
+order_handler = logging.FileHandler('order.log', encoding='utf-8')
 order_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 order_logger.addHandler(order_handler)
 
@@ -350,12 +351,18 @@ def do_it():
             
             # Sử dụng exchange.price_to_precision() để làm tròn đúng theo quy tắc Binance
             try:
-                activation_price = float(exchange.price_to_precision(symbol, activation_price_raw))
+                activation_price_str = exchange.price_to_precision(symbol, activation_price_raw)
+                activation_price = float(activation_price_str)
             except Exception as e:
                 # Fallback: dùng round nếu price_to_precision lỗi
-                precision = binance_utils.get_price_precision(symbol)
-                activation_price = round(activation_price_raw, precision)
-                logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+                try:
+                    precision = binance_utils.get_price_precision(symbol)
+                    activation_price = round(activation_price_raw, precision)
+                    logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+                except Exception as e2:
+                    print(f"⚠️  {symbol}: Không thể làm tròn activation price: {e2}, bỏ qua", flush=True)
+                    logger.error(f"{symbol}: Không thể làm tròn activation price: {e2}", exc_info=True)
+                    continue
             
             # Validate activation_price > 0 SAU KHI làm tròn (có thể bị làm tròn thành 0 nếu quá nhỏ)
             if activation_price <= 0:
@@ -377,6 +384,20 @@ def do_it():
                 reduce_only=False
             )
             
+            # Log chi tiết order data để debug
+            logger.info(f"[ORDER DATA] {symbol} - Order structure: id={order.get('id', 'N/A')}, symbol={order.get('symbol', 'N/A')}, side={order.get('side', 'N/A')}, status={order.get('status', 'N/A')}")
+            if 'info' in order and isinstance(order['info'], dict):
+                info_keys = list(order['info'].keys())
+                logger.info(f"[ORDER DATA] {symbol} - info keys: {info_keys}")
+                if 'algoId' in order['info']:
+                    logger.info(f"[ORDER DATA] {symbol} - algoId: {order['info']['algoId']}")
+                if 'activatePrice' in order['info']:
+                    logger.info(f"[ORDER DATA] {symbol} - activatePrice from info: {order['info']['activatePrice']}")
+                if 'callbackRate' in order['info']:
+                    logger.info(f"[ORDER DATA] {symbol} - callbackRate from info: {order['info']['callbackRate']}")
+                if 'algoStatus' in order['info']:
+                    logger.info(f"[ORDER DATA] {symbol} - algoStatus: {order['info']['algoStatus']}")
+            
             msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
             
             # Log vào order.log
@@ -384,7 +405,7 @@ def do_it():
             
             printf(symbol, order)
             print(f"✅ Đã tạo lệnh TRAILING_STOP cho {symbol}", flush=True)
-            logger.info(f"✅ Lệnh TRAILING_STOP đã được tạo: {order}")
+            logger.info(f"✅ Lệnh TRAILING_STOP đã được tạo thành công cho {symbol} (Order ID: {order.get('id', 'N/A')})")
             telegram_factory.send_tele(msg, cst.chat_id, True, True)
 
         except Exception as e:
@@ -397,32 +418,43 @@ def do_it():
 
 def printf(name, data):
     """Lưu thông tin order vào file"""
-    print(data, flush=True)
-    pathDir = str(Path().absolute()).replace("\\", "/")
-    
-    # Tìm order ID từ nhiều nguồn có thể
-    order_id = None
-    if 'id' in data:
-        order_id = data['id']
-    elif 'info' in data:
-        if 'orderId' in data['info']:
-            order_id = data['info']['orderId']
-        elif 'id' in data['info']:
-            order_id = data['info']['id']
-        elif 'order_id' in data['info']:
-            order_id = data['info']['order_id']
-    
-    # Nếu không tìm thấy order ID, dùng timestamp
-    if not order_id:
-        from datetime import datetime
-        order_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logger.warning(f"Không tìm thấy order ID trong response, dùng timestamp: {order_id}")
-    
-    filename = pathDir + "/order/" + str(name) + "/" + str(order_id) + ".txt"
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-    f = open(filename, "w")
-    f.write(str(data))
-    f.close()    
+    try:
+        print(data, flush=True)
+        pathDir = str(Path().absolute()).replace("\\", "/")
+        
+        # Tìm order ID từ nhiều nguồn có thể (theo thứ tự ưu tiên)
+        order_id = None
+        
+        # Ưu tiên 1: data['id'] (CCXT standard)
+        if 'id' in data:
+            order_id = str(data['id'])
+        
+        # Ưu tiên 2: data['info']['algoId'] (Binance algo orders)
+        elif 'info' in data and isinstance(data['info'], dict):
+            if 'algoId' in data['info']:
+                order_id = str(data['info']['algoId'])
+            elif 'orderId' in data['info']:
+                order_id = str(data['info']['orderId'])
+            elif 'id' in data['info']:
+                order_id = str(data['info']['id'])
+            elif 'order_id' in data['info']:
+                order_id = str(data['info']['order_id'])
+        
+        # Nếu không tìm thấy order ID, dùng timestamp
+        if not order_id:
+            order_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            logger.warning(f"Không tìm thấy order ID trong response cho {name}, dùng timestamp: {order_id}")
+        
+        filename = pathDir + "/order/" + str(name) + "/" + str(order_id) + ".txt"
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        
+        # Ghi file với UTF-8 encoding
+        with open(filename, "w", encoding='utf-8') as f:
+            f.write(str(data))
+            
+    except Exception as e:
+        logger.error(f"Lỗi trong printf() cho {name}: {e}", exc_info=True)
+        print(f"⚠️ Lỗi khi lưu order file cho {name}: {e}", flush=True)    
 
 while True:
     try:
