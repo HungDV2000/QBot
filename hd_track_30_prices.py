@@ -6,7 +6,8 @@ Logic:
 - Quét sheet "ĐẶT LỆNH (100 MÃ)" hàng 4-53 (SHORT) và 55-104 (LONG)
 - Chỉ track mã có cột B (Leverage) ≠ 0, ≠ "N"
 - Lấy 19 mức giá gần nhất (nến 1m) từ Binance
-- Ghi vào cột H:Z (19 cột) của cùng hàng với mã đó
+- Ghi vào cột I:Z (18 cột) của cùng hàng với mã đó (H là Capital, bỏ qua)
+  Nếu cần 19 giá, sẽ lấy tối đa 18 giá gần nhất
 """
 
 import ccxt
@@ -119,9 +120,9 @@ class PriceTracker:
             return []
     
     def track_prices(self):
-        """Track và cập nhật 19 mức giá gần nhất cho các mã có leverage hợp lệ"""
-        print(f"=== Bắt đầu tracking 19 prices - {datetime.now()} ===", flush=True)
-        logger.info(f"=== Bắt đầu tracking 19 prices - {datetime.now()} ===")
+        """Track và cập nhật 18 mức giá gần nhất cho các mã có leverage hợp lệ (cột I:Z, bỏ qua H)"""
+        print(f"=== Bắt đầu tracking 18 prices - {datetime.now()} ===", flush=True)
+        logger.info(f"=== Bắt đầu tracking 18 prices - {datetime.now()} ===")
         
         symbols_with_orders = self.get_symbols_with_orders()
         
@@ -142,26 +143,26 @@ class PriceTracker:
                 price_data = data_collector.get_30_recent_prices(symbol)
                 
                 if price_data:
-                    # Chỉ track 19 giá (H đến Z = 19 cột) thay vì 30
-                    # H = price 1, I = price 2, ..., Z = price 19
-                    # Vì update_multi chỉ hỗ trợ đến cột Z
+                    # Track giá từ cột I đến Z (18 cột), BỎ QUA cột H (Capital)
+                    # I = price 1, J = price 2, ..., Z = price 18
+                    # Vì cột H là Capital nên không được ghi đè
                     
-                    prices_only = [p['price'] for p in price_data[-19:]]  # Lấy tối đa 19 giá gần nhất
+                    prices_only = [p['price'] for p in price_data[-18:]]  # Lấy tối đa 18 giá gần nhất (I-Z = 18 cột)
                     
-                    # Pad nếu không đủ 19
-                    while len(prices_only) < 19:
+                    # Pad nếu không đủ 18
+                    while len(prices_only) < 18:
                         prices_only.insert(0, "")
                     
-                    # Update vào sheet (cột H:Z tương ứng 19 prices)
+                    # Update vào sheet (cột I:Z tương ứng 18 prices, bỏ qua H)
                     gg_sheet_factory.update_multi(
                         gg_sheet_factory.tab_dat_lenh,
                         row_num - 2,  # array_index = row_num - 2 (vì update_multi dùng index = 2 + array_index)
                         [prices_only],
-                        "H"  # Bắt đầu từ cột H
+                        "I"  # Bắt đầu từ cột I (sau H)
                     )
                     
-                    print(f"✅ Đã update 19 prices cho {symbol} tại hàng {row_num}", flush=True)
-                    logger.info(f"✅ Đã update 19 prices cho {symbol} tại hàng {row_num}")
+                    print(f"✅ Đã update 18 prices cho {symbol} tại hàng {row_num} (cột I:Z, bỏ qua H)", flush=True)
+                    logger.info(f"✅ Đã update 18 prices cho {symbol} tại hàng {row_num} (cột I:Z)")
                 else:
                     print(f"⚠️ Không lấy được price data cho {symbol}", flush=True)
                     logger.warning(f"Không lấy được price data cho {symbol}")
@@ -173,8 +174,8 @@ class PriceTracker:
                 traceback.print_exc()
                 continue
         
-        print(f"=== Hoàn thành tracking 19 prices ===\n", flush=True)
-        logger.info(f"=== Hoàn thành tracking 19 prices ===\n")
+        print(f"=== Hoàn thành tracking 18 prices ===\n", flush=True)
+        logger.info(f"=== Hoàn thành tracking 18 prices ===\n")
 
 
 def do_it():
@@ -184,8 +185,8 @@ def do_it():
 
 
 if __name__ == "__main__":
-    print("🚀 Khởi động module Track 19 Prices", flush=True)
-    logger.info("🚀 Khởi động module Track 19 Prices")
+    print("🚀 Khởi động module Track 18 Prices (I:Z, bỏ qua H)", flush=True)
+    logger.info("🚀 Khởi động module Track 18 Prices")
     
     while True:
         try:
