@@ -424,7 +424,7 @@ def do_it():
 
         # Bollinger Bands chỉ 2 khung: 1h và 1d (giống file cũ)
         result_bb_array = get_bb(pair,  timeframes = [ '1h', '1d'])
-        row.extend(result_bb_array)
+        row.extend(result_bb_array)  # D-G (4 cột)
 
         # Biên độ 1h max tăng/giảm tuần (7 ngày)
         max_price_increase_month1, max_price_decrease_month1 = calculate_price_range(pair, 7, '1h')
@@ -432,18 +432,88 @@ def do_it():
         max_price_increase_month1 = "" if np.isnan(max_price_increase_month1) else max_price_increase_month1
         max_price_decrease_month1 = "" if np.isnan(max_price_decrease_month1) else max_price_decrease_month1
 
-        row.append(max_price_increase_month1)
-        row.append(max_price_decrease_month1)
+        row.append(max_price_increase_month1)  # H
+        row.append(max_price_decrease_month1)  # I
 
         # Giá cao/thấp 40 ngày (giống file cũ)
         high, low = calculate_high_low_30d(symbol)
-        row.append(high)
-        row.append(low)
+        row.append(high)  # J
+        row.append(low)   # K
 
         # Biên độ tăng/giảm 4h/60 ngày
         increase, decrease = calculate_max_increase_decrease_4h(symbol)
-        row.append(increase)
-        row.append(decrease)
+        row.append(increase)  # L
+        row.append(decrease)  # M
+        
+        # Cột N-O: BB 1 tuần (thêm mới cho tất cả các mã)
+        bb_1w = get_bb(pair, timeframes=['1w'])
+        row.extend(bb_1w)  # N-O (2 cột)
+        
+        # Cột P-Q: Biên độ 30 ngày (thêm mới)
+        bd = get_bien_do_max(pair)
+        row.append(bd[4])  # P: Biên độ 30d tăng
+        row.append(bd[5])  # Q: Biên độ 30d giảm
+        
+        # Cột R-S: Volume 24h và RSI (thêm mới)
+        try:
+            # Volume 24h từ ticker
+            volume_24h = tickers[symbol].get('quoteVolume', 0)  # R
+            row.append(volume_24h)
+            
+            # RSI 14 (tính từ 1d)
+            ohlcv_rsi = exchange.fetch_ohlcv(pair, '1d', limit=15)
+            closes = [x[4] for x in ohlcv_rsi]
+            gains = []
+            losses = []
+            for i in range(1, len(closes)):
+                change = closes[i] - closes[i-1]
+                gains.append(max(0, change))
+                losses.append(max(0, -change))
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            rs = avg_gain / avg_loss if avg_loss != 0 else 0
+            rsi = 100 - (100 / (1 + rs))
+            row.append(round(rsi, 2))  # S: RSI
+        except:
+            row.extend([0, 0])  # R-S trống nếu lỗi
+        
+        # Cột T: Trống (dự phòng)
+        row.append("")
+        
+        # Cột U: % vị trí trong range 40 ngày
+        # Công thức: (Giá thấp nhất / Min 40 ngày)
+        # Theo yêu cầu: U = O/K
+        # O là Giá thấp nhất (BB1w lower ở cột O)
+        # K là Min 40 ngày
+        if low != 0:
+            ratio = round((bb_1w[1] / low), 4)  # O/K
+            row.append(ratio)  # U
+        else:
+            row.append("")
+        
+        # Cột V-Z: Dữ liệu bổ sung (5 cột)
+        # V: Khoảng cách từ giá hiện tại đến BB1h trên
+        distance_to_bb_up = round(((result_bb_array[0] - price) / price) * 100, 2) if price != 0 else 0
+        row.append(distance_to_bb_up)  # V
+        
+        # W: Khoảng cách từ giá hiện tại đến BB1h dưới
+        distance_to_bb_down = round(((price - result_bb_array[1]) / price) * 100, 2) if price != 0 else 0
+        row.append(distance_to_bb_down)  # W
+        
+        # X-Y: Volume 1h và 4h
+        try:
+            vol_1h = data_collector.get_volumes_multi_timeframe(pair, timeframes=['1h']).get('1h', 0)
+            vol_4h = data_collector.get_volumes_multi_timeframe(pair, timeframes=['4h']).get('4h', 0)
+            row.append(vol_1h)  # X
+            row.append(vol_4h)  # Y
+        except:
+            row.extend([0, 0])
+        
+        # Z: Trống (dự phòng)
+        row.append("")
+        
+        # AA: Marker (trống - có thể dùng sau)
+        row.append("")
 
         return row
 
@@ -514,21 +584,8 @@ def do_it():
     
 
 
-    
-    
-    list_them_2d_arr = []
-    for symbol in list_them:
-        row_data = []
-        bb_1d = get_bb(symbol, timeframes = [ '1w'])
-        row_data.extend(bb_1d)
-        bd =  get_bien_do_max(symbol) 
-        row_data.append(bd[4])
-        row_data.append(bd[5])
-        list_them_2d_arr.append(row_data)
-
-    print(list_them_2d_arr, flush=True)
-    
-    gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, 1, list_them_2d_arr, "N")
+    # Không cần ghi thêm dữ liệu bổ sung cho BTC/BTCDOM vào cột N
+    # Vì giờ tất cả các mã đã có đủ cột N-AA rồi
 
 
 
@@ -537,15 +594,51 @@ def do_it():
     # Hàng 2: Thông tin tài khoản (giống file cũ)
     tab_100_ma_2d_arr = [["Số dư margin/ví/pnl", totalMarginBalance,  totalWalletBalance, totalCrossUnPnl]]  + tab_100_ma_2d_arr
 
-    # Thêm timestamp vào đầu array (giống file cũ - không có header riêng)
+    # Hàng 1: Tiêu đề các cột
+    header_row = [
+        "Mã",                           # A
+        "% 24h",                        # B
+        "Giá trị hiện thời",           # C
+        "BB1h trên",                    # D
+        "BB1h dưới",                    # E
+        "BB1 ngày trên",                # F
+        "BB1 ngày dưới",                # G
+        "Biên độ 1h max tăng tuần",    # H
+        "Biên độ 1h max giảm tuần",    # I
+        "Max 40 ngày",                  # J
+        "Min 40 ngày",                  # K
+        "Max tăng 4h/60 ngày",         # L
+        "Max giảm 4h/60 ngày",         # M
+        "Giá Cao Nhất",                # N: BB1w trên
+        "Giá Thấp Nhất",               # O: BB1w dưới
+        "Biên độ 30d tăng",            # P
+        "Biên độ 30d giảm",            # Q
+        "Volume 24h",                   # R
+        "RSI 14",                       # S
+        "",                             # T: Trống
+        "Min/Min40",                    # U: O/K ratio
+        "% đến BB1h trên",             # V
+        "% đến BB1h dưới",             # W
+        "Vol 1h",                       # X
+        "Vol 4h",                       # Y
+        "",                             # Z: Trống
+        "Delist"                        # AA
+    ]
+    
+    # Thêm header vào đầu array
+    tab_100_ma_2d_arr = [header_row] + tab_100_ma_2d_arr
+    
+    # Thêm timestamp vào A1 sau khi có header
     current_time = datetime.now()
     time_string = current_time.strftime("%Y-%m-%d %H:%M:%S")
-    tab_100_ma_2d_arr = [[time_string]]  + tab_100_ma_2d_arr
     
     print(f"Tổng số dòng dữ liệu: {len(tab_100_ma_2d_arr)}", flush=True)
     
-    # Ghi tất cả dữ liệu từ hàng 1 (giống file cũ)
+    # Ghi tất cả dữ liệu từ hàng 1
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, -1, tab_100_ma_2d_arr, "A")
+    
+    # Ghi timestamp vào A1 (ghi đè lên header)
+    gg_sheet_factory.update_single_value(gg_sheet_factory.tab_list_all_ma, "A1", time_string)
 
     
 

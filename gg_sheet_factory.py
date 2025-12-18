@@ -196,13 +196,12 @@ def update_multi(tab_name, array_index, array_2d, from_column_alphabet_name):
   
   
   print("----------------------------")
-  print(array_2d)
+  print(f"Ghi {len(array_2d)} dòng vào {RANGE_NAME}", flush=True)
   init_sheet_api()
 
   try:
       values = array_2d
       body = {"values": values}
-      print(body)
       result = (
           service.spreadsheets()
           .values()
@@ -214,7 +213,7 @@ def update_multi(tab_name, array_index, array_2d, from_column_alphabet_name):
           )
           .execute()
       )
-      print(f"{result.get('updatedCells')} cells updated.")
+      print(f"{result.get('updatedCells')} cells updated.", flush=True)
       return result
   except HttpError as error:
       print(f"An error occurred: {error}")
