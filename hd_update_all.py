@@ -380,7 +380,7 @@ def do_it():
     
     
 
-    white_list = set(gg_sheet_factory.get_white_list())
+    white_list = set(gg_sheet_factory.get_white_list())  
     print(f"Danh sách whitelist từ sheet (tổng {len(white_list)} mã):", flush=True)
     print(white_list, flush=True)
     
@@ -421,7 +421,7 @@ def do_it():
         print(symbol, tickers[symbol]['percentage'], price, flush=True)
         pair= symbol.replace(":USDT", "")
         row = [pair, tickers[symbol]['percentage'], price]
-
+        
         # Bollinger Bands chỉ 2 khung: 1h và 1d (giống file cũ)
         result_bb_array = get_bb(pair,  timeframes = [ '1h', '1d'])
         row.extend(result_bb_array)  # D-G (4 cột)
@@ -479,7 +479,7 @@ def do_it():
         
         # Cột T: Trống (dự phòng)
         row.append("")
-        
+            
         # Cột U: % vị trí trong range 40 ngày
         # Công thức: (Giá thấp nhất / Min 40 ngày)
         # Theo yêu cầu: U = O/K
