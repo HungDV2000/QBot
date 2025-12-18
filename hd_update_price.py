@@ -18,7 +18,13 @@ import os
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-logging.basicConfig(filename='hd_update_price.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+# Chỉ log ERROR vào error.log (stderr), không có file log riêng
+logging.basicConfig(
+    level=logging.ERROR,  # Chỉ log ERROR
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 def set_cmd_title(title):
     ctypes.windll.kernel32.SetConsoleTitleW(title)
@@ -37,7 +43,7 @@ exchange.setSandboxMode(False)
    
 
 def do_it():
-    print(f"-------------------------------start scan giá: {datetime.now()}-------------------------------------")
+    print(f"-------------------------------start scan giá: {datetime.now()}-------------------------------------", flush=True)
     start_time = time.time()
 
     # Fix: Thêm retry logic cho fetch_tickers()
@@ -51,16 +57,16 @@ def do_it():
             break
         except Exception as e:
             if attempt < max_retries - 1:
-                print(f"Lỗi khi fetch_tickers (lần thử {attempt + 1}/{max_retries}): {e}")
-                print(f"Đợi {retry_delay} giây trước khi thử lại...")
+                print(f"Lỗi khi fetch_tickers (lần thử {attempt + 1}/{max_retries}): {e}", flush=True)
+                print(f"Đợi {retry_delay} giây trước khi thử lại...", flush=True)
                 time.sleep(retry_delay)
             else:
-                print(f"Lỗi fetch_tickers sau {max_retries} lần thử: {e}")
-                logging.error(f"Lỗi fetch_tickers: {e}")
+                print(f"Lỗi fetch_tickers sau {max_retries} lần thử: {e}", flush=True)
+                logger.error(f"Lỗi fetch_tickers: {e}", exc_info=True)
                 raise
     
     if tickers is None:
-        print("Không thể lấy dữ liệu tickers, bỏ qua lần này")
+        print("Không thể lấy dữ liệu tickers, bỏ qua lần này", flush=True)
         return
 
     
@@ -77,13 +83,14 @@ def do_it():
             
             if sym:
                 list_all.append(sym+":USDT")
-                print(sym)
+                print(sym, flush=True)
             else:
                 break
             
 
         except Exception as e:
-            print(f"Lỗi:getLenh23Rate : {e}")
+            print(f"Lỗi:getLenh23Rate : {e}", flush=True)
+            logger.error(f"Lỗi xử lý symbol: {e}", exc_info=True)
 
     tab_100_ma_2d_arr = []
 
@@ -91,27 +98,27 @@ def do_it():
     
     for symbol in list_all:
         if not not_symbol_contain in symbol:
-            print(symbol)
+            print(symbol, flush=True)
             
-            print(symbol, tickers[symbol]['last'])
+            print(symbol, tickers[symbol]['last'], flush=True)
             pair= symbol.replace(":USDT", "")
             
             row = [ tickers[symbol]['last']]
             tab_100_ma_2d_arr.append(row)
         else:
-            print("---------------")
+            print("---------------", flush=True)
             tab_100_ma_2d_arr.append([])
 
     
     
     
     
-    print(tab_100_ma_2d_arr)
+    print(tab_100_ma_2d_arr, flush=True)
     gg_sheet_factory.update_multi(gg_sheet_factory.tab_list_all_ma, 1, tab_100_ma_2d_arr, "Y")
 
     end_time = time.time()
     execution_time = end_time - start_time
-    print("Thời gian thực thi:", execution_time, "giây")
+    print(f"Thời gian thực thi: {execution_time} giây", flush=True)
  
 
 while True:
@@ -120,8 +127,9 @@ while True:
         
         
     except Exception as e:
-        print("Tổng Lỗi:", e)
-        logging.error("Tổng lỗi: %s", str(e))
+        print(f"Tổng Lỗi: {e}", flush=True)
+        logger.error(f"Tổng lỗi: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
 
-    
     time.sleep(cst.delay_update_price)

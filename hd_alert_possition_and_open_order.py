@@ -16,11 +16,12 @@ from notification_manager import get_notification_manager
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Cải thiện logging
+# Log file riêng (liên quan đến positions/orders - xử lý tiền)
 logging.basicConfig(
     filename='hd_alert_possition_and_open_order.log', 
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ def get_all_open_orders_with_single_order():
     res = []
     
     for sym in  utils.get_all_open_orders_symbol_local():
-        print(sym)
+        print(sym, flush=True)
         
         
         orders = exchange.fetch_open_orders(symbol=sym)
@@ -55,7 +56,7 @@ def get_all_open_orders_with_single_order():
             res.append(orders[0])
         
         for order in orders:
-            print(f"Symbol: {order['symbol']}, ID: {order['id']}, Status: {order['status']}, Amount: {order['amount']}, Price: {order['price']}")
+            print(f"Symbol: {order['symbol']}, ID: {order['id']}, Status: {order['status']}, Amount: {order['amount']}, Price: {order['price']}", flush=True)
     return res
 
 def get_opened_possition():
@@ -72,9 +73,9 @@ def get_opened_possition():
         unrealized_pnl = float(position['unrealizedProfit'])
         leverage = int(position['leverage'])
         if position_amt != 0:
-            print(position)
+            print(position, flush=True)
             opened_possition.append(position)
-            print(f"Symbol: {symbol}, Position: {position_amt}, Entry Price: {entry_price}, Unrealized PnL: {unrealized_pnl}, Leverage: {leverage}")
+            print(f"Symbol: {symbol}, Position: {position_amt}, Entry Price: {entry_price}, Unrealized PnL: {unrealized_pnl}, Leverage: {leverage}", flush=True)
     return opened_possition
 
 result_old = []
@@ -105,11 +106,11 @@ def cancel_all_open_orders(symbol):
 def do_it():
     global result_old, is_first_time  
 
-    print(f"{datetime.now()}. hd_alert_possition_and_open_order----------------------------------------------------")
+    print(f"{datetime.now()}. hd_alert_possition_and_open_order----------------------------------------------------", flush=True)
 
     res = get_opened_possition()
-    print(f"Tổng Lệnh: {len(res)}")
-    print(res)
+    print(f"Tổng Lệnh: {len(res)}", flush=True)
+    print(res, flush=True)
 
     
     
@@ -133,8 +134,9 @@ def do_it():
                 break
 
         if not is_contain:
-            print(f"phần tử mới được thêm vào: {item}")
+            print(f"phần tử mới được thêm vào: {item}", flush=True)
             symbol = item['symbol']
+            logger.info(f"✅ Position mới mở: {symbol} - Entry: {item.get('entryPrice', 'N/A')} - Amount: {item.get('positionAmt', 'N/A')} - Leverage: {item.get('leverage', 'N/A')}")
             notif_mgr.send_position_opened(symbol)
 
 
@@ -147,7 +149,7 @@ def do_it():
                 break
 
         if not is_contain:
-            print(f"phần tử cũ được bỏ đi: {item_old}")
+            print(f"phần tử cũ được bỏ đi: {item_old}", flush=True)
             symbol = item_old['symbol']
             
             # Detect TP hay SL bằng cách check PnL
@@ -177,10 +179,10 @@ def do_it():
                     
                     # Xử lý theo TP/SL
                     if is_tp:
-                        logger.info(f"💰 TP khớp cho {symbol} lớp {layer_num}")
+                        logger.info(f"💰 TP khớp cho {symbol} lớp {layer_num} - Entry: {item_old.get('entryPrice', 'N/A')} - PnL: {pnl:.2f}")
                         cascade_mgr.on_tp_filled(symbol, layer_num)
                     else:
-                        logger.info(f"🛑 SL khớp cho {symbol} lớp {layer_num}")
+                        logger.info(f"🛑 SL khớp cho {symbol} lớp {layer_num} - Entry: {item_old.get('entryPrice', 'N/A')} - PnL: {pnl:.2f}")
                         cascade_mgr.on_sl_filled(symbol, layer_num)
                     
                     # Gửi thông báo đóng vị thế
@@ -191,7 +193,7 @@ def do_it():
                     notif_mgr.send_position_closed(symbol)
                     
             except Exception as e:
-                logger.error(f"Lỗi xử lý TP/SL cho {symbol}: {e}")
+                logger.error(f"Lỗi xử lý TP/SL cho {symbol}: {e}", exc_info=True)
                 notif_mgr.send_position_closed(symbol)
 
             # Hủy tất cả lệnh chờ
@@ -266,8 +268,10 @@ while True:
         
 
     except Exception as e:
-        print("Tổng Lỗi:", e)
-        logging.error("Tổng lỗi: %s", str(e))
+        print(f"Tổng Lỗi: {e}", flush=True)
+        logger.error(f"Tổng lỗi: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
 
     time.sleep(cst.delay_calert_possition_and_open_order)
     

@@ -23,11 +23,11 @@ import os
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Setup logging
+# Chỉ log ERROR vào error.log (stderr), không có file log riêng
 logging.basicConfig(
-    filename='hd_track_30_prices.log', 
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.ERROR,  # Chỉ log ERROR
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ def do_it():
 
 
 if __name__ == "__main__":
-    print("🚀 Khởi động module Track 18 Prices (I:Z, bỏ qua H)", flush=True)
+    print("🚀 Khởi động module Track 18 Prices", flush=True)
     logger.info("🚀 Khởi động module Track 18 Prices")
     
     while True:

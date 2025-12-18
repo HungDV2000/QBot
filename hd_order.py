@@ -17,13 +17,21 @@ from binance_order_helper import BinanceOrderHelper, cancel_all_open_orders_with
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Cải thiện logging
+# Cải thiện logging với timestamp
 logging.basicConfig(
     filename='hd_order.log', 
-    level=logging.INFO,  # Thay đổi từ ERROR sang INFO
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Tạo order logger riêng để track tất cả orders
+order_logger = logging.getLogger('order')
+order_logger.setLevel(logging.INFO)
+order_handler = logging.FileHandler('order.log')
+order_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+order_logger.addHandler(order_handler)
 
 exchange_id = 'binance'
 exchange_class = getattr(ccxt, exchange_id)
@@ -349,6 +357,9 @@ def do_it():
             
             msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
             
+            # Log vào order.log
+            order_logger.info(f"LỆNH 1 (Entry) | {symbol} | {type} | Activation: {activation_price} | Callback: {callback_rate}% | Leverage: {leverage}x | Capital: {capitalMoney} USDT | Order ID: {order.get('id', 'N/A')}")
+            
             printf(symbol, order)
             print(f"✅ Đã tạo lệnh TRAILING_STOP cho {symbol}", flush=True)
             logger.info(f"✅ Lệnh TRAILING_STOP đã được tạo: {order}")
@@ -356,14 +367,14 @@ def do_it():
 
         except Exception as e:
             print(f"❌ Lỗi xử lý dòng {sym}: {e}", flush=True)
-            logger.error(f"Lỗi khi xử lý dòng: {e}")
+            logger.error(f"Lỗi khi xử lý dòng {sym}: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
       
       start_row += 1
 
 def printf(name,data):
-    print(data)
+    print(data, flush=True)
     pathDir=str(Path().absolute()).replace("\\","/")
     filename=pathDir+"/order/"+str(name)+"/"+str(data['info']['orderId'])+".txt"
     os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -376,7 +387,9 @@ while True:
         do_it()
         
     except Exception as e:
-        print("Tổng Lỗi:", e)
-        logging.error("Tổng lỗi: %s", str(e))
+        print(f"Tổng Lỗi: {e}", flush=True)
+        logger.error(f"Tổng lỗi: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
 
     time.sleep(cst.delay_vao_lenh)

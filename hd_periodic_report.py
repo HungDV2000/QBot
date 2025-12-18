@@ -14,11 +14,11 @@ import os
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Setup logging
+# Chỉ log ERROR vào error.log (stderr), không có file log riêng
 logging.basicConfig(
-    filename='hd_periodic_report.log', 
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.ERROR,  # Chỉ log ERROR
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
@@ -87,8 +87,7 @@ def get_balance_info():
 
 def do_it():
     """Main loop - Kiểm tra và gửi báo cáo"""
-    logger.info(f"=== Kiểm tra báo cáo định kỳ - {datetime.now()} ===")
-    
+    # Chỉ log ERROR, không log INFO (theo yêu cầu)
     balance_info = get_balance_info()
     
     if balance_info:
@@ -102,23 +101,12 @@ def do_it():
             pending_orders_count=balance_info['pending_orders_count'],
             force_send=False  # Không bắt buộc, để manager tự quyết định
         )
-        
-        logger.info(f"Balance: Wallet=${balance_info['wallet_balance']:.2f}, "
-                   f"Margin=${balance_info['margin_balance']:.2f}, "
-                   f"PNL=${balance_info['unrealized_pnl']:.2f} ({balance_info['unrealized_pnl_percent']:+.2f}%), "
-                   f"Positions={balance_info['open_positions_count']}, "
-                   f"Orders={balance_info['pending_orders_count']}")
     else:
-        logger.error("Không lấy được thông tin balance")
-    
-    logger.info(f"=== Hoàn thành kiểm tra ===\n")
+        logger.error("Không lấy được thông tin balance", exc_info=True)
 
 
 if __name__ == "__main__":
-    logger.info("🚀 Khởi động module Periodic Report")
-    
     # Gửi báo cáo đầu tiên ngay lập tức
-    logger.info("Gửi báo cáo khởi động...")
     balance_info = get_balance_info()
     if balance_info:
         notif_mgr.send_balance_report(
@@ -135,10 +123,11 @@ if __name__ == "__main__":
         try:
             do_it()
         except Exception as e:
-            logger.error(f"Tổng lỗi: {e}")
+            logger.error(f"Tổng lỗi: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
         
         # Sleep 5 phút
         sleep_time = getattr(cst, 'delay_periodic_report', 300)  # Default 5 minutes
-        logger.info(f"Ngủ {sleep_time}s...")
         time.sleep(sleep_time)
 

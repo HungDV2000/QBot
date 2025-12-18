@@ -19,7 +19,13 @@ from data_collector import DataCollector, get_data_collector
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-logging.basicConfig(filename='error_pumb_dump.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+# Chỉ log ERROR vào error.log (stderr), không có file log riêng
+logging.basicConfig(
+    level=logging.ERROR,  # Chỉ log ERROR
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 is_test_mode = False
 
 calculate_high_low_day_total = 40
@@ -665,9 +671,9 @@ while True:
 
     except Exception as e:
         print(f"Tổng Lỗi: {e}", flush=True)
+        logger.error(f"Tổng lỗi: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
-        logging.error("Tổng lỗi: %s", str(e))
 
     if is_test_mode:
         break

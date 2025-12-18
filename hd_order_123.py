@@ -18,13 +18,21 @@ from notification_manager import NotificationManager, get_notification_manager
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Cải thiện logging
+# Cải thiện logging với timestamp
 logging.basicConfig(
     filename='hd_order_123.log', 
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Order logger (ghi vào order.log chung)
+order_logger = logging.getLogger('order')
+order_logger.setLevel(logging.INFO)
+order_handler = logging.FileHandler('order.log')
+order_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+order_logger.addHandler(order_handler)
 
 STATE_SHORT = "SHORT"
 STATE_LONG  = "LONG"
@@ -119,7 +127,7 @@ def do_it():
             
             amount = float(position['positionAmt'])
             if amount !=0:
-                print(f"Vị thế: {position}")
+                print(f"Vị thế: {position}", flush=True)
                 orders = exchange.fetch_open_orders(symbol=symbol)
                 tong_so_lenh_dang_mo = len(orders)
                 
@@ -176,6 +184,10 @@ def do_it():
                                 end_row=start_row + 49
                             )
                             
+                            # Log vào order.log
+                            order_logger.info(f"LỆNH 2 (SL) | {symbol} | {side} | Entry: {entry_price} | SL Rate: {lenh2rate} | Order ID: {sl_order.get('id', 'N/A')}")
+                            order_logger.info(f"LỆNH 3 (TP) | {symbol} | {side} | Entry: {entry_price} | TP Rate: {lenh3rate} | Callback: {cst.lenh3_callback_rate}% | Order ID: {tp_order.get('id', 'N/A')}")
+                            
                             msg = f"✅ <b>ĐÃ TẠO SL + TP CHO LỚP 1</b>\n\n<b>Mã:</b> {symbol}\n<b>Entry Price:</b> {entry_price}\n<b>Leverage:</b> {leverage}x\n<b>SL Order:</b> {sl_order.get('id')}\n<b>TP Order:</b> {tp_order.get('id')}"
                             telegram_factory.send_tele(msg, cst.chat_id, True, True)
                             logger.info(f"✅ Cascade lớp 1 hoàn tất cho {symbol}")
@@ -226,7 +238,10 @@ def do_it():
 
 
         except Exception as e:
-            print(f"Một lỗi đã xảy ra: {e}")
+            print(f"Một lỗi đã xảy ra: {e}", flush=True)
+            logger.error(f"Lỗi xử lý position {symbol}: {e}", exc_info=True)
+            import traceback
+            traceback.print_exc()
 
 
 
@@ -239,8 +254,10 @@ while True:
         
         
     except Exception as e:
-        print("Tổng Lỗi:", e)
-        logging.error("Tổng lỗi: %s", str(e))
+        print(f"Tổng Lỗi: {e}", flush=True)
+        logger.error(f"Tổng lỗi: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
 
     time.sleep(cst.delay_vao_lenh_123)
 

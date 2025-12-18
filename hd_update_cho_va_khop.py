@@ -9,7 +9,13 @@ import os
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-logging.basicConfig(filename='hd_update_cho_va_khop.log', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+# Chỉ log ERROR vào error.log (stderr), không có file log riêng
+logging.basicConfig(
+    level=logging.ERROR,  # Chỉ log ERROR
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 exchange_id = 'binance'
 exchange_class = getattr(ccxt, exchange_id)
@@ -38,7 +44,7 @@ def get_all_open_orders_with_single_order():
         # Không truyền symbol = lấy tất cả orders của tất cả symbols
         all_orders = exchange.fetch_open_orders()
         
-        print(f"Tổng số orders từ Binance: {len(all_orders)}")
+        print(f"Tổng số orders từ Binance: {len(all_orders)}", flush=True)
         
         # Nhóm orders theo symbol
         orders_by_symbol = {}
@@ -77,18 +83,18 @@ def get_opened_possition():
         unrealized_pnl = float(position.get('unrealizedProfit', 0)) if position.get('unrealizedProfit') else 0.0
         leverage = int(position.get('leverage', 1)) if position.get('leverage') else 1
         if position_amt != 0:
-            print(position)
+            print(position, flush=True)
             opened_possition.append(position)
-            print(f"Symbol: {symbol}, Position: {position_amt}, Entry Price: {entry_price}, Unrealized PnL: {unrealized_pnl}, Leverage: {leverage}")
+            print(f"Symbol: {symbol}, Position: {position_amt}, Entry Price: {entry_price}, Unrealized PnL: {unrealized_pnl}, Leverage: {leverage}", flush=True)
     return opened_possition
 
 def do_it():
-    print(f"{datetime.now()}. Update chờ và khớp----------------------------------------------------")
+    print(f"{datetime.now()}. Update chờ và khớp----------------------------------------------------", flush=True)
 
     tab_100_ma_2d_arr = []
     res = get_opened_possition()
-    print(f"Tổng Lệnh: {len(res)}")
-    print(res)
+    print(f"Tổng Lệnh: {len(res)}", flush=True)
+    print(res, flush=True)
     
     for position in res:
         position_amt = float(position['positionAmt'])
@@ -111,23 +117,23 @@ def do_it():
             
             lenh_tp= "N"
             lenh_ls= "N"
-        print(cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2)
+        print(cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2, flush=True)
         row  = cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2
         tab_100_ma_2d_arr.append(row)
 
     res1 = get_all_open_orders_with_single_order()
-    print(res1)
-    print(f"Tổng Lệnh: {len(res1)}")
+    print(res1, flush=True)
+    print(f"Tổng Lệnh: {len(res1)}", flush=True)
 
     for order in res1:
-        print(f"Symbol: {order['symbol']}, ID: {order['id']}, Status: {order['status']}, Amount: {order['amount']}, Price: {order['price']}")
+        print(f"Symbol: {order['symbol']}, ID: {order['id']}, Status: {order['status']}, Amount: {order['amount']}, Price: {order['price']}", flush=True)
         
         
         order_symbol = order['info']['symbol']
         if next((position for position in res if order_symbol == position['symbol']), None):
                 continue
 
-        print(f"Found: {order}")
+        print(f"Found: {order}", flush=True)
         
         cac_ma = order_symbol
         side = order['info']['side']
@@ -139,7 +145,7 @@ def do_it():
         lenh_tp= "N"
         lenh_ls= "N"
         lenh_nguoc_da_co_chua_co_2 = 0
-        print(cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2)
+        print(cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2, flush=True)
         row  = cac_ma.replace("USDT", "/USDT"),vi_the_short_long ,cho_khop,da_khop_mo_vi_the , gia_vao,don_bay , lenh_tp, lenh_ls, lenh_nguoc_da_co_chua_co_2
         tab_100_ma_2d_arr.append(row)
 
@@ -151,7 +157,7 @@ def do_it():
     gg_sheet_factory.clear_multi(gg_sheet_factory.tab_cho_va_khop, 0, "a", end_row=1000)
     
     # Fix: Ghi timestamp vào A4 trước (riêng biệt để đảm bảo được cập nhật)
-    print(f"Cập nhật timestamp vào A4: {current_time}")
+    print(f"Cập nhật timestamp vào A4: {current_time}", flush=True)
     gg_sheet_factory.update_single_value(gg_sheet_factory.tab_cho_va_khop, "A4", current_time)
     
     # Thêm timestamp vào đầu array
@@ -169,7 +175,9 @@ while True:
         
         
     except Exception as e:
-        print("Tổng Lỗi:", e)
-        logging.error("Tổng lỗi: %s", str(e))
-    
+        print(f"Tổng Lỗi: {e}", flush=True)
+        logger.error(f"Tổng lỗi: {e}", exc_info=True)
+        import traceback
+        traceback.print_exc()
+
     time.sleep(cst.delay_cho_va_khop)
