@@ -340,7 +340,15 @@ def do_it():
             amount = amountUsdt / lastPrice
             
             # CHỈ HỖ TRỢ TRAILING STOP (theo quy trình thực tế)
-            activation_price = round(float(str(d[activation_idx]).replace("%", "")), binance_utils.get_price_precision(symbol))
+            activation_price_raw = float(str(d[activation_idx]).replace("%", ""))
+            
+            # Validate activation_price > 0
+            if activation_price_raw <= 0:
+                print(f"⚠️  {symbol}: Activation price = {activation_price_raw} (phải > 0), bỏ qua", flush=True)
+                logger.warning(f"{symbol}: Activation price = {activation_price_raw} (phải > 0), bỏ qua")
+                continue
+            
+            activation_price = round(activation_price_raw, binance_utils.get_price_precision(symbol))
             callback_rate = float(str(d[callback_idx]).replace("%", ""))
             
             print(f"📤 Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%", flush=True)
@@ -373,10 +381,30 @@ def do_it():
       
       start_row += 1
 
-def printf(name,data):
+def printf(name, data):
+    """Lưu thông tin order vào file"""
     print(data, flush=True)
-    pathDir=str(Path().absolute()).replace("\\","/")
-    filename=pathDir+"/order/"+str(name)+"/"+str(data['info']['orderId'])+".txt"
+    pathDir = str(Path().absolute()).replace("\\", "/")
+    
+    # Tìm order ID từ nhiều nguồn có thể
+    order_id = None
+    if 'id' in data:
+        order_id = data['id']
+    elif 'info' in data:
+        if 'orderId' in data['info']:
+            order_id = data['info']['orderId']
+        elif 'id' in data['info']:
+            order_id = data['info']['id']
+        elif 'order_id' in data['info']:
+            order_id = data['info']['order_id']
+    
+    # Nếu không tìm thấy order ID, dùng timestamp
+    if not order_id:
+        from datetime import datetime
+        order_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logger.warning(f"Không tìm thấy order ID trong response, dùng timestamp: {order_id}")
+    
+    filename = pathDir + "/order/" + str(name) + "/" + str(order_id) + ".txt"
     os.makedirs(os.path.dirname(filename), exist_ok=True)
     f = open(filename, "w")
     f.write(str(data))
