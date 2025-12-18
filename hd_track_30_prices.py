@@ -1,6 +1,12 @@
 """
-Tracking 30 Price Levels - Module tracking 30 mức giá gần nhất cho lệnh đã đặt
-Chạy mỗi 1 phút để cập nhật giá cho các mã đang ở trạng thái "Chờ" hoặc "Khớp"
+Tracking 30 Price Levels - Module tracking 30 mức giá gần nhất (thực tế 19 giá do giới hạn cột)
+Chạy mỗi 1 phút để cập nhật giá cho các mã có Leverage ≠ 0 và ≠ N (sẽ được bot đặt lệnh)
+
+Logic:
+- Quét sheet "ĐẶT LỆNH (100 MÃ)" hàng 4-53 (SHORT) và 55-104 (LONG)
+- Chỉ track mã có cột B (Leverage) ≠ 0, ≠ "N"
+- Lấy 19 mức giá gần nhất (nến 1m) từ Binance
+- Ghi vào cột H:Z (19 cột) của cùng hàng với mã đó
 """
 
 import ccxt
@@ -49,54 +55,63 @@ class PriceTracker:
     
     def get_symbols_with_orders(self) -> List[Dict]:
         """
-        Lấy danh sách các mã đang có lệnh (Chờ hoặc Khớp)
+        Lấy danh sách các mã có Leverage ≠ 0 và ≠ N (theo quy trình đặt lệnh thực tế)
         
         Returns:
-            List[Dict]: Danh sách với keys: symbol, state, order_price, filled_price
+            List[Dict]: Danh sách với keys: symbol, leverage, activation_price
         """
         result = []
         
         try:
             # Đọc từ sheet Order (LONG section)
-            long_data = gg_sheet_factory.get_dat_lenh("A55:G104")
+            # Cấu trúc CŨ: A=Symbol, B=Leverage, C=Callback, D=Activation, H=Capital
+            long_data = gg_sheet_factory.get_dat_lenh("A55:H104")
             for idx, row in enumerate(long_data):
                 if len(row) > 0 and row[0]:  # Có symbol
                     symbol = row[0]
-                    state = row[3] if len(row) > 3 else ""  # Cột D: Mã lệnh hiện tại
+                    leverage = row[1] if len(row) > 1 else ""  # Cột B: Leverage
                     
-                    # Chỉ track nếu đang có lệnh (1a, 1b, 1c, 2a...)
-                    if state and len(state) >= 2:
-                        order_price = float(row[6]) if len(row) > 6 and row[6] else 0.0  # Cột G: Giá vào
-                        filled_price = order_price if "a" in state else 0.0  # Nếu là entry (1a, 2a) thì có filled price
-                        
-                        result.append({
-                            'symbol': symbol,
-                            'state': state,
-                            'order_price': order_price,
-                            'filled_price': filled_price,
-                            'row_num': 55 + idx
-                        })
+                    # Chỉ track nếu leverage ≠ 0, ≠ "N", và là số hợp lệ
+                    # (Theo quy trình: B ≠ 0 và B ≠ "N" thì bot sẽ đặt lệnh)
+                    if leverage and leverage != "N" and leverage != "0" and leverage != 0:
+                        try:
+                            lev_value = float(leverage)
+                            if lev_value > 0:
+                                activation = row[3] if len(row) > 3 else 0.0  # Cột D: Activation Price
+                                
+                                result.append({
+                                    'symbol': symbol,
+                                    'leverage': lev_value,
+                                    'activation_price': float(activation) if activation else 0.0,
+                                    'row_num': 55 + idx
+                                })
+                        except (ValueError, TypeError):
+                            # Nếu leverage không phải số, bỏ qua
+                            pass
             
             # Đọc từ sheet Order (SHORT section)
-            short_data = gg_sheet_factory.get_dat_lenh("A4:G53")
+            short_data = gg_sheet_factory.get_dat_lenh("A4:H53")
             for idx, row in enumerate(short_data):
                 if len(row) > 0 and row[0]:
                     symbol = row[0]
-                    state = row[3] if len(row) > 3 else ""
+                    leverage = row[1] if len(row) > 1 else ""
                     
-                    if state and len(state) >= 2:
-                        order_price = float(row[6]) if len(row) > 6 and row[6] else 0.0
-                        filled_price = order_price if "a" in state else 0.0
-                        
-                        result.append({
-                            'symbol': symbol,
-                            'state': state,
-                            'order_price': order_price,
-                            'filled_price': filled_price,
-                            'row_num': 4 + idx
-                        })
+                    if leverage and leverage != "N" and leverage != "0" and leverage != 0:
+                        try:
+                            lev_value = float(leverage)
+                            if lev_value > 0:
+                                activation = row[3] if len(row) > 3 else 0.0
+                                
+                                result.append({
+                                    'symbol': symbol,
+                                    'leverage': lev_value,
+                                    'activation_price': float(activation) if activation else 0.0,
+                                    'row_num': 4 + idx
+                                })
+                        except (ValueError, TypeError):
+                            pass
             
-            logger.info(f"Tìm thấy {len(result)} mã đang có lệnh")
+            logger.info(f"Tìm thấy {len(result)} mã có leverage hợp lệ (sẽ đặt lệnh)")
             return result
             
         except Exception as e:
@@ -104,21 +119,30 @@ class PriceTracker:
             return []
     
     def track_prices(self):
-        """Track và cập nhật 30 mức giá cho các mã có lệnh"""
-        logger.info(f"=== Bắt đầu tracking 30 prices - {datetime.now()} ===")
+        """Track và cập nhật 19 mức giá gần nhất cho các mã có leverage hợp lệ"""
+        print(f"=== Bắt đầu tracking 19 prices - {datetime.now()} ===", flush=True)
+        logger.info(f"=== Bắt đầu tracking 19 prices - {datetime.now()} ===")
         
         symbols_with_orders = self.get_symbols_with_orders()
+        
+        if not symbols_with_orders:
+            print("⚠️ Không tìm thấy mã nào có leverage hợp lệ (B ≠ 0, B ≠ N)", flush=True)
+            logger.info("Không tìm thấy mã nào có leverage hợp lệ")
+            return
         
         for item in symbols_with_orders:
             symbol = item['symbol']
             row_num = item['row_num']
+            leverage = item['leverage']
             
             try:
+                print(f"📊 Tracking {symbol} (Hàng {row_num}, Leverage {leverage}x)...", flush=True)
+                
                 # Lấy 30 mức giá gần nhất
                 price_data = data_collector.get_30_recent_prices(symbol)
                 
                 if price_data:
-                    # Fix: Chỉ track 19 giá (H đến Z = 19 cột) thay vì 30
+                    # Chỉ track 19 giá (H đến Z = 19 cột) thay vì 30
                     # H = price 1, I = price 2, ..., Z = price 19
                     # Vì update_multi chỉ hỗ trợ đến cột Z
                     
@@ -129,23 +153,28 @@ class PriceTracker:
                         prices_only.insert(0, "")
                     
                     # Update vào sheet (cột H:Z tương ứng 19 prices)
-                    # Sử dụng update_multi với array_index là row_num
                     gg_sheet_factory.update_multi(
                         gg_sheet_factory.tab_dat_lenh,
-                        row_num - 2,  # Fix: array_index = row_num - 2 (vì update_multi dùng index = 2 + array_index)
+                        row_num - 2,  # array_index = row_num - 2 (vì update_multi dùng index = 2 + array_index)
                         [prices_only],
                         "H"  # Bắt đầu từ cột H
                     )
                     
-                    logger.info(f"✅ Đã update 30 prices cho {symbol} tại hàng {row_num}")
+                    print(f"✅ Đã update 19 prices cho {symbol} tại hàng {row_num}", flush=True)
+                    logger.info(f"✅ Đã update 19 prices cho {symbol} tại hàng {row_num}")
                 else:
+                    print(f"⚠️ Không lấy được price data cho {symbol}", flush=True)
                     logger.warning(f"Không lấy được price data cho {symbol}")
                     
             except Exception as e:
+                print(f"❌ Lỗi tracking prices cho {symbol}: {e}", flush=True)
                 logger.error(f"Lỗi tracking prices cho {symbol}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
         
-        logger.info(f"=== Hoàn thành tracking 30 prices ===\n")
+        print(f"=== Hoàn thành tracking 19 prices ===\n", flush=True)
+        logger.info(f"=== Hoàn thành tracking 19 prices ===\n")
 
 
 def do_it():
@@ -155,15 +184,21 @@ def do_it():
 
 
 if __name__ == "__main__":
-    logger.info("🚀 Khởi động module Track 30 Prices")
+    print("🚀 Khởi động module Track 19 Prices", flush=True)
+    logger.info("🚀 Khởi động module Track 19 Prices")
     
     while True:
         try:
             do_it()
         except Exception as e:
+            print(f"❌ Tổng lỗi: {e}", flush=True)
             logger.error(f"Tổng lỗi: {e}")
+            import traceback
+            traceback.print_exc()
         
-        # Sleep 1 phút
-        logger.info(f"Ngủ {cst.delay_track_30_prices if hasattr(cst, 'delay_track_30_prices') else 60}s...")
-        time.sleep(getattr(cst, 'delay_track_30_prices', 60))
+        # Sleep theo config (mặc định 60s)
+        delay = getattr(cst, 'delay_track_30_prices', 60)
+        print(f"💤 Ngủ {delay}s...", flush=True)
+        logger.info(f"Ngủ {delay}s...")
+        time.sleep(delay)
 

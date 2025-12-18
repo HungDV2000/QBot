@@ -106,31 +106,28 @@ STATE_CHO  = "CHỜ"
 LENH_CHO = "LỆNH CHỜ"
 
 def do_it():
+  print(f"{datetime.now()}. Scan Vào Lệnh----------------------------------------------------", flush=True)
   logger.info(f"{datetime.now()}. Scan Vào Lệnh----------------------------------------------------")
 
-  # Đọc trạng thái hệ thống - Support cả C1 (mới) và B2 (cũ) để backward compatible
+  # Đọc trạng thái hệ thống từ B2 (theo quy trình thực tế)
   try:
-    c1_value = gg_sheet_factory.get_dat_lenh("C1:C1")[0][0].strip().upper()
-    state_value = c1_value  # Ưu tiên C1
-    logger.info(f"Đọc trạng thái từ C1: {state_value}")
+    state_value = gg_sheet_factory.get_dat_lenh("B2:B2")[0][0].strip().upper()
+    print(f"📌 Trạng thái: {state_value}", flush=True)
+    logger.info(f"Đọc trạng thái từ B2: {state_value}")
   except (IndexError, KeyError):
-    # Fallback sang B2 nếu C1 không có
-    try:
-      b2_value = gg_sheet_factory.get_dat_lenh("B2:B2")[0][0].strip().upper()
-      state_value = b2_value
-      logger.info(f"Fallback: Đọc trạng thái từ B2: {state_value}")
-    except:
-      state_value = STATE_CHO
-      logger.warning("Không đọc được trạng thái, mặc định CHỜ")
+    state_value = STATE_CHO
+    print(f"⚠️ Không đọc được trạng thái B2, mặc định CHỜ", flush=True)
+    logger.warning("Không đọc được trạng thái từ B2, mặc định CHỜ")
   
-  # Đọc vốn mặc định (support cả cũ và mới)
+  # Đọc vốn mặc định từ E2
   try:
-    e2_value = gg_sheet_factory.get_dat_lenh("E2:E2")[0][0].strip().upper()
+    e2_value = gg_sheet_factory.get_dat_lenh("E2:E2")[0][0].strip()
+    print(f"💰 Vốn mặc định: {e2_value} USDT", flush=True)
+    logger.info(f"Vốn mặc định từ E2: {e2_value}")
   except:
     e2_value = "0"
+    print(f"⚠️ Không đọc được vốn E2, mặc định 0", flush=True)
     logger.warning("Không đọc được vốn mặc định từ E2")
-  
-  logger.info(f"Trạng thái: {state_value}, Vốn mặc định: {e2_value}")
 
   if state_value == STATE_STOP:
     logger.warning("🛑 LỆNH STOP ĐƯỢC KÍCH HOẠT!")
@@ -231,6 +228,7 @@ def do_it():
         telegram_factory.send_tele(msg, cst.chat_id, True, True)
 
   elif state_value == STATE_CHO:
+    print("💤 Trạng thái CHỜ - Không làm gì...", flush=True)
     logger.info("Trạng thái CHỜ - Không làm gì...")
   else:
     
@@ -244,81 +242,67 @@ def do_it():
       end_row = 53
       type = "SHORT"
 
-    don_bay = gg_sheet_factory.get_dat_lenh(f"A{start_row}:Z{end_row}")
+    don_bay = gg_sheet_factory.get_dat_lenh(f"A{start_row}:H{end_row}")  # Chỉ cần đọc A-H
+    print(f"🔍 Scan {state_value} từ hàng {start_row} đến {end_row}", flush=True)
     logger.info(f"Scan {state_value} từ hàng {start_row} đến {end_row}")
-    for d in don_bay:
-        
-        
-        
-      
-      
-      
-      
-      
     
-
-      # Xác định cấu trúc cột từ config (không auto-detect để tránh nhầm lẫn)
-      # Cấu trúc MỚI: J=leverage (index 9), K=callback (index 10), L=activation (index 11), O=capital (index 14)
-      # Cấu trúc CŨ: B=leverage (index 1), C=callback (index 2), D=activation (index 3), H=capital (index 7)
+    for d in don_bay:
+      # Cấu trúc CỐ ĐỊNH: A=Symbol, B=Leverage, C=Callback, D=Activation, H=Capital
+      # Chỉ hỗ trợ TRAILING_STOP
+      leverage_idx = 1    # Cột B
+      callback_idx = 2    # Cột C
+      activation_idx = 3  # Cột D
+      capital_idx = 7     # Cột H
       
-      if cst.order_column_structure == 'new':
-        # Cấu trúc MỚI: J, K, L, O
-        leverage_idx = 9
-        callback_idx = 10
-        activation_idx = 11
-        capital_idx = 14
-        structure_type = "MỚI"
-      else:
-        # Cấu trúc CŨ: B, C, D, H
-        leverage_idx = 1
-        callback_idx = 2
-        activation_idx = 3
-        capital_idx = 7
-        structure_type = "CŨ"
-      
-      logger.info(f"Cấu trúc cột: {structure_type} (từ config) - Symbol: {d[0] if len(d) > 0 else 'N/A'}, Leverage index: {leverage_idx}, Activation index: {activation_idx}")
-      
-      if d[leverage_idx] != "N" and is_number(d[leverage_idx]) and is_number(d[activation_idx]):
+      # Validation: B ≠ "N" và B ≠ 0 và B là số hợp lệ
+      if len(d) > leverage_idx and d[leverage_idx]:
+        leverage_value = str(d[leverage_idx]).strip()
+        
+        # Kiểm tra leverage hợp lệ
+        if leverage_value == "N" or leverage_value == "0":
+          continue
+        
+        if not is_number(leverage_value):
+          continue
+          
+        try:
+          lev_float = float(leverage_value)
+          if lev_float <= 0:
+            continue
+        except (ValueError, TypeError):
+          continue
+        
+        # Kiểm tra activation là số hợp lệ
+        if len(d) <= activation_idx or not d[activation_idx]:
+          continue
+        if not is_number(d[activation_idx]):
+          continue
 
         try:
             sym = d[0]
             
             # Validate symbol
             if not sym or not str(sym).strip():
-                logger.warning(f"Symbol trống ở dòng, bỏ qua")
                 continue
             
             sym = str(sym).strip()
             
             # Kiểm tra symbol đã có vị thế/lệnh chờ chưa
             if is_opened_order_1(sym):
+                print(f"⏭️  {sym} đã có lệnh, bỏ qua", flush=True)
                 logger.info(f"{sym} Đã vào lệnh, bỏ qua")
                 continue
-        
-            # Detect order type: Cấu trúc mới đọc từ cột I (index 8), cấu trúc cũ mặc định TRAILING_STOP
-            order_type_str = ""
-            if cst.order_column_structure == 'new':
-                # Cấu trúc mới: Đọc từ cột I (index 8)
-                try:
-                    if len(d) > 8 and d[8] and str(d[8]).strip():
-                        order_type_str = str(d[8]).strip().upper()
-                except:
-                    pass
-                
-                # Default to TRAILING STOP nếu không có
-                if not order_type_str or "TRAILING" in order_type_str:
-                    order_type_str = "TRAILING_STOP"
-            else:
-                # Cấu trúc cũ: Chỉ hỗ trợ TRAILING_STOP
-                order_type_str = "TRAILING_STOP"
             
-            logger.info(f"--- Vào lệnh 1 {state_value}: {d[0]} {order_type_str} đòn bẩy: {d[leverage_idx]}")
+            print(f"🎯 Vào lệnh 1 {state_value}: {sym} (Leverage {d[leverage_idx]}x)", flush=True)
+            logger.info(f"--- Vào lệnh 1 {state_value}: {sym} TRAILING_STOP đòn bẩy: {d[leverage_idx]}")
 
-            capitalMoney = float(e2_value)
+            # Đọc vốn từ cột H, nếu trống dùng E2
+            capitalMoney = float(e2_value) if e2_value != "0" else 100
             try:
-                capitalMoney = float(d[capital_idx])
-            except (ValueError, TypeError, IndexError) as e:
-                logger.warning(f"Không đọc được vốn từ cột {capital_idx}, dùng mặc định: {e}")
+                if len(d) > capital_idx and d[capital_idx]:
+                    capitalMoney = float(d[capital_idx])
+            except (ValueError, TypeError):
+                pass
 
             symbol = d[0]
             
@@ -332,109 +316,50 @@ def do_it():
 
             # Set leverage
             try:
-                leverage = int(d[leverage_idx])
-                if(leverage>0):
-                    exchange.setLeverage (leverage, symbol)
+                leverage = int(float(d[leverage_idx]))
+                if leverage > 0:
+                    exchange.setLeverage(leverage, symbol)
                     logger.info(f"Đã thiết lập đòn bẩy {leverage} cho cặp giao dịch {symbol}")
             except Exception as e:
+                print(f"⚠️ Không thể set leverage cho {symbol}: {e}", flush=True)
                 logger.warning(f"Không thể set leverage: {e}")
                 leverage = 1
                 
             # Tính amount
-            ticker =exchange.fetch_ticker(symbol)
-            lastPrice=ticker["last"]
-            amountUsdt=float(capitalMoney)
-            amount =amountUsdt/lastPrice
+            ticker = exchange.fetch_ticker(symbol)
+            lastPrice = ticker["last"]
+            amountUsdt = float(capitalMoney)
+            amount = amountUsdt / lastPrice
             
-            # Tạo lệnh theo loại
-            order = None
-            if "TRAILING" in order_type_str or "TRAILING_STOP" in order_type_str:
-                # TRAILING STOP
-                activation_price = round(float(d[activation_idx].replace("%", "")), binance_utils.get_price_precision(symbol))
-                callback_rate = float(d[callback_idx].replace("%", ""))
-                
-                logger.info(f"Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%")
-                order = order_helper.create_trailing_stop_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=amount,
-                    activation_price=activation_price,
-                    callback_rate=callback_rate,
-                    reduce_only=False
-                )
-                msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
-                
-            elif "STOP_LIMIT" in order_type_str or "STOP LIMIT" in order_type_str:
-                # STOP LIMIT - Chỉ hỗ trợ với cấu trúc mới
-                if cst.order_column_structure != 'new':
-                    logger.error(f"❌ STOP_LIMIT chỉ hỗ trợ với cấu trúc MỚI. Vui lòng đặt order_column_structure = new trong config.ini")
-                    continue
-                
-                # Cột M = stop_price (index 12), Cột N = limit_price (index 13)
-                stop_price_idx = 12
-                limit_price_idx = 13
-                
-                stop_price = round(float(d[stop_price_idx].replace("%", "")), binance_utils.get_price_precision(symbol))
-                limit_price = round(float(d[limit_price_idx].replace("%", "")), binance_utils.get_price_precision(symbol))
-                
-                logger.info(f"Tạo Stop Limit: {symbol} {side} @ stop={stop_price}, limit={limit_price}")
-                order = order_helper.create_stop_limit_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=amount,
-                    stop_price=stop_price,
-                    limit_price=limit_price,
-                    reduce_only=False
-                )
-                msg = f"✅ <b>LỆNH CHỜ (STOP LIMIT)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Stop Price:</b> {stop_price}\n<b>Limit Price:</b> {limit_price}\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
-                
-            elif "LIMIT" in order_type_str:
-                # LIMIT - Chỉ hỗ trợ với cấu trúc mới
-                if cst.order_column_structure != 'new':
-                    logger.error(f"❌ LIMIT chỉ hỗ trợ với cấu trúc MỚI. Vui lòng đặt order_column_structure = new trong config.ini")
-                    continue
-                
-                # Cột N = limit_price (index 13)
-                limit_price_idx = 13
-                limit_price = round(float(d[limit_price_idx].replace("%", "")), binance_utils.get_price_precision(symbol))
-                
-                logger.info(f"Tạo Limit: {symbol} {side} @ {limit_price}")
-                order = order_helper.create_limit_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=amount,
-                    limit_price=limit_price,
-                    reduce_only=False
-                )
-                msg = f"✅ <b>LỆNH CHỜ (LIMIT)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Limit Price:</b> {limit_price}\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
-                
-            else:
-                # MARKET - Chỉ hỗ trợ với cấu trúc mới
-                if cst.order_column_structure != 'new':
-                    logger.error(f"❌ MARKET chỉ hỗ trợ với cấu trúc MỚI. Vui lòng đặt order_column_structure = new trong config.ini")
-                    continue
-                
-                logger.info(f"Tạo Market: {symbol} {side}")
-                order = order_helper.create_market_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=amount,
-                    reduce_only=False
-                )
-                msg = f"✅ <b>LỆNH KHỚP NGAY (MARKET)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá:</b> Market\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
+            # CHỈ HỖ TRỢ TRAILING STOP (theo quy trình thực tế)
+            activation_price = round(float(str(d[activation_idx]).replace("%", "")), binance_utils.get_price_precision(symbol))
+            callback_rate = float(str(d[callback_idx]).replace("%", ""))
             
-            if order:
-                printf(symbol, order)
-                logger.info(f"✅ Lệnh {order_type_str} đã được tạo: {order}")
-                telegram_factory.send_tele(msg, cst.chat_id, True, True)
+            print(f"📤 Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%", flush=True)
+            logger.info(f"Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%")
+            
+            order = order_helper.create_trailing_stop_order(
+                symbol=symbol,
+                side=side,
+                amount=amount,
+                activation_price=activation_price,
+                callback_rate=callback_rate,
+                reduce_only=False
+            )
+            
+            msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
+            
+            printf(symbol, order)
+            print(f"✅ Đã tạo lệnh TRAILING_STOP cho {symbol}", flush=True)
+            logger.info(f"✅ Lệnh TRAILING_STOP đã được tạo: {order}")
+            telegram_factory.send_tele(msg, cst.chat_id, True, True)
 
-            
-            
         except Exception as e:
+            print(f"❌ Lỗi xử lý dòng {sym}: {e}", flush=True)
             logger.error(f"Lỗi khi xử lý dòng: {e}")
             import traceback
             traceback.print_exc()
-            print(f"Một lỗi đã xảy ra: {e}", flush=True)
+      
       start_row += 1
 
 def printf(name,data):

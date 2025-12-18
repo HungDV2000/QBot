@@ -144,11 +144,13 @@ class CascadeManager:
         is_long = (side == 'LONG')
         
         # Tính stop price
+        # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
+        # Ví dụ: lenh2_rate=0.3 → SL kích hoạt khi giá thay đổi 30% (không phải 3% khi leverage=10x)
         if is_long:
-            stop_price = entry_price * (1 - lenh2_rate / leverage)
+            stop_price = entry_price * (1 - lenh2_rate)
             order_side = 'sell'
         else:
-            stop_price = entry_price * (1 + lenh2_rate / leverage)
+            stop_price = entry_price * (1 + lenh2_rate)
             order_side = 'buy'
         
         precision = binance_utils.get_price_precision(symbol)
@@ -183,11 +185,13 @@ class CascadeManager:
         is_long = (side == 'LONG')
         
         # Tính activation price
+        # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
+        # Ví dụ: lenh3_rate=0.6 → TP kích hoạt khi giá thay đổi 60% (không phải 6% khi leverage=10x)
         if is_long:
-            activation_price = entry_price * (1 + lenh3_rate / leverage)
+            activation_price = entry_price * (1 + lenh3_rate)
             order_side = 'sell'
         else:
-            activation_price = entry_price * (1 - lenh3_rate / leverage)
+            activation_price = entry_price * (1 - lenh3_rate)
             order_side = 'buy'
         
         precision = binance_utils.get_price_precision(symbol)

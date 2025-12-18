@@ -36,6 +36,3 @@ max_increase_decrease_4h_day_count = config.getint('global', 'max_increase_decre
 delay_track_30_prices = config.getint('global', 'delay_track_30_prices')
 delay_periodic_report = config.getint('global', 'delay_periodic_report')
 
-# Order column structure: 'new' hoặc 'old'
-order_column_structure = config.get('global', 'order_column_structure', fallback='new').lower()
-
