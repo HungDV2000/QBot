@@ -87,14 +87,12 @@ def has_position(sym):
         logger.error(f"Lỗi khi kiểm tra vị thế cho {sym}: {e}", exc_info=True)
         return False
 
-def cancel_existing_trailing_stop_orders(symbol):
-    """Hủy tất cả order TRAILING_STOP cũ của symbol trước khi tạo order mới"""
+def has_pending_trailing_stop_order(symbol):
+    """Kiểm tra symbol đã có order TRAILING_STOP pending chưa"""
     try:
+        # BƯỚC 1: Kiểm tra Basic orders (thông thường)
         open_orders = exchange.fetch_open_orders(symbol=symbol)
-        cancelled_count = 0
-        orders_to_cancel = []
         
-        # Bước 1: Thu thập tất cả order TRAILING_STOP cần hủy
         for order in open_orders:
             # Check nhiều trường để detect TRAILING_STOP
             order_type = order.get('type', '')
@@ -102,7 +100,6 @@ def cancel_existing_trailing_stop_orders(symbol):
             algo_type = order.get('info', {}).get('algoType', '')
             order_type_raw = order.get('info', {}).get('type', '')
             
-            # Kiểm tra tất cả các trường có chứa "TRAILING"
             is_trailing = (
                 'TRAILING' in str(order_type).upper() or
                 'TRAILING' in str(order_type_info).upper() or
@@ -111,47 +108,40 @@ def cancel_existing_trailing_stop_orders(symbol):
             )
             
             if is_trailing:
-                order_id = order.get('id') or order.get('info', {}).get('algoId') or order.get('info', {}).get('orderId')
-                if order_id:
-                    orders_to_cancel.append(order_id)
-                    logger.info(f"Phát hiện order TRAILING_STOP cần hủy: {symbol} - Order ID: {order_id} - Type: {order_type}/{order_type_info}/{algo_type}")
-        
-        # Bước 2: Hủy từng order
-        for order_id in orders_to_cancel:
-            try:
-                exchange.cancel_order(str(order_id), symbol)
-                cancelled_count += 1
-                logger.info(f"✅ Đã hủy order TRAILING_STOP: {symbol} - Order ID: {order_id}")
-                print(f"🗑️  Đã hủy order TRAILING_STOP cũ cho {symbol}: {order_id}", flush=True)
-            except Exception as e:
-                logger.warning(f"⚠️ Không thể hủy order {order_id} cho {symbol}: {e}")
-        
-        # Bước 3: Verify đã hủy thành công (chờ và kiểm tra lại)
-        if cancelled_count > 0:
-            time.sleep(1.5)  # Chờ Binance xử lý
-            
-            # Kiểm tra lại xem còn order nào không
-            remaining_orders = exchange.fetch_open_orders(symbol=symbol)
-            remaining_trailing = 0
-            for order in remaining_orders:
-                order_type = order.get('type', '')
-                order_type_info = order.get('info', {}).get('orderType', '')
-                algo_type = order.get('info', {}).get('algoType', '')
+                order_id = order.get('id') or order.get('info', {}).get('algoId')
+                activation_price = order.get('info', {}).get('activatePrice', 'N/A')
+                callback_rate = order.get('info', {}).get('callbackRate', 'N/A')
                 
-                if 'TRAILING' in str(order_type).upper() or 'TRAILING' in str(order_type_info).upper() or 'TRAILING' in str(algo_type).upper():
-                    remaining_trailing += 1
-                    logger.warning(f"⚠️ Còn order TRAILING_STOP sau khi hủy: {symbol} - Order ID: {order.get('id')}")
-            
-            if remaining_trailing > 0:
-                logger.warning(f"⚠️ {symbol}: Còn {remaining_trailing} order TRAILING_STOP sau khi hủy!")
-                print(f"⚠️ {symbol}: Còn {remaining_trailing} order TRAILING_STOP chưa hủy được!", flush=True)
-            else:
-                logger.info(f"✅ {symbol}: Đã hủy sạch tất cả {cancelled_count} order TRAILING_STOP")
+                logger.info(f"✅ {symbol} đã có order TRAILING_STOP (Basic) - Order ID: {order_id}, Activation: {activation_price}, Callback: {callback_rate}")
+                return True
         
-        return cancelled_count
+        # BƯỚC 2: Kiểm tra Algo/Conditional orders (QUAN TRỌNG!)
+        # TRAILING_STOP thường nằm trong Conditional orders
+        try:
+            # Lấy tất cả algo orders đang pending
+            algo_orders = exchange.fapiPrivateGetAlgoOpenOrders({'symbol': symbol.replace('/', '')})
+            
+            if 'orders' in algo_orders and algo_orders['orders']:
+                for order in algo_orders['orders']:
+                    algo_type = order.get('algoType', '')
+                    
+                    # VP = Volume Participation (TRAILING_STOP type)
+                    if algo_type == 'VP':
+                        algo_id = order.get('algoId', 'N/A')
+                        activation_price = order.get('activatePrice', 'N/A')
+                        callback_rate = order.get('callbackRate', 'N/A')
+                        
+                        logger.info(f"✅ {symbol} đã có Algo order TRAILING_STOP (Conditional) - Algo ID: {algo_id}, Activation: {activation_price}, Callback: {callback_rate}")
+                        print(f"⏭️  {symbol} đã có Algo order TRAILING_STOP (Conditional), bỏ qua", flush=True)
+                        return True
+        except Exception as algo_error:
+            # Nếu không có quyền truy cập algo orders hoặc API lỗi, log warning nhưng không crash
+            logger.warning(f"Không thể kiểm tra algo orders cho {symbol}: {algo_error}")
+        
+        return False
     except Exception as e:
-        logger.error(f"Lỗi khi hủy order cũ cho {symbol}: {e}", exc_info=True)
-        return 0
+        logger.error(f"Lỗi khi kiểm tra order pending cho {symbol}: {e}", exc_info=True)
+        return False
 
 def execute_command(commands):
     try:
@@ -355,19 +345,17 @@ def do_it():
             
             sym = str(sym).strip()
             
-            # Kiểm tra symbol đã có VỊ THẾ (đã vào lệnh) chưa - nếu có thì bỏ qua
+            # Bước 1: Kiểm tra symbol đã có VỊ THẾ (đã vào lệnh) chưa
             if has_position(sym):
                 print(f"⏭️  {sym} đã có vị thế, bỏ qua", flush=True)
                 logger.info(f"{sym} Đã có vị thế, bỏ qua")
                 continue
             
-            # Nếu chưa có vị thế nhưng có order chờ → HỦY order cũ trước khi tạo mới
-            cancelled = cancel_existing_trailing_stop_orders(sym)
-            if cancelled > 0:
-                print(f"🧹 Đã hủy {cancelled} order TRAILING_STOP cũ của {sym}", flush=True)
-                # Chờ 2 giây để Binance xử lý hoàn tất việc hủy order
-                time.sleep(2.0)
-                logger.info(f"Đã chờ 2s sau khi hủy {cancelled} order của {sym}")
+            # Bước 2: Kiểm tra symbol đã có ORDER TRAILING_STOP pending chưa
+            if has_pending_trailing_stop_order(sym):
+                print(f"⏭️  {sym} đã có lệnh chờ TRAILING_STOP, bỏ qua", flush=True)
+                logger.info(f"{sym} Đã có lệnh chờ TRAILING_STOP, bỏ qua")
+                continue
             
             print(f"🎯 Vào lệnh 1 {state_value}: {sym} (Leverage {d[leverage_idx]}x)", flush=True)
             logger.info(f"--- Vào lệnh 1 {state_value}: {sym} TRAILING_STOP đòn bẩy: {d[leverage_idx]}")
