@@ -3,7 +3,6 @@ import cst
 from pathlib import Path
 import time
 import telegram_factory
-import schedule
 import logging
 import os
 
@@ -47,73 +46,37 @@ exchange = exchange_class({
 exchange.setSandboxMode(False)
 
 
-
-
 import gg_sheet_factory
 from datetime import datetime
 
 def my_function():
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{current_time}] Hàm đang chạy...", flush=True)
-
-    
-    
-    
-
-    
-    
-    
-    
-    
-    
-    
-
-    
-    
+    try:
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[{current_time}] Hàm đang chạy...", flush=True)
+        logger.info(f"[{current_time}] Bắt đầu cancel orders theo lịch")
+        
+        for symbol in gg_sheet_factory.get_cho_va_khop("A3:A100"):
+            if symbol and len(symbol) > 0 and "USDT" in str(symbol[0]):
+                print(f"cancel: {symbol[0]}", flush=True)
+                cancel_all_open_orders(symbol[0])
+    except Exception as e:
+        print(f"Lỗi trong my_function: {e}", flush=True)
+        logger.error(f"Lỗi trong my_function: {e}", exc_info=True)
 
 
-    
-    
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    
-    
-
-    
-    for symbol in gg_sheet_factory.get_cho_va_khop("A3:A100"):
-        if "USDT" in str(symbol) :
-            print(f"cancel: {symbol[0]}")
-            cancel_all_open_orders(symbol[0])
-
-
-
-
-schedule.every(cst.cancel_orders_minutes).minutes.do(my_function)
+# Thay thế schedule bằng logic đơn giản với time.sleep
 print(f"Bắt đầu chạy...{cst.cancel_orders_minutes} phút một lần")
+logger.info(f"Khởi động cancel orders scheduler - chạy mỗi {cst.cancel_orders_minutes} phút")
 
+# Chạy ngay lần đầu
+my_function()
+
+# Sau đó chạy theo interval
 while True:
-    schedule.run_pending()
-    time.sleep(1)
-
-
-
-
-
-
-
+    try:
+        time.sleep(cst.cancel_orders_minutes * 60)  # Chuyển phút thành giây
+        my_function()
+    except Exception as e:
+        print(f"Lỗi trong vòng lặp cancel orders: {e}", flush=True)
+        logger.error(f"Lỗi trong vòng lặp cancel orders: {e}", exc_info=True)
+        time.sleep(60)  # Chờ 1 phút trước khi thử lại

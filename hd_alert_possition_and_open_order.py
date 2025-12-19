@@ -66,16 +66,27 @@ def get_opened_possition():
     opened_possition = []
     
     for position in positions:
-        
-        symbol = position['symbol']
-        position_amt = float(position['positionAmt'])
-        entry_price = float(position['entryPrice'])
-        unrealized_pnl = float(position['unrealizedProfit'])
-        leverage = int(position['leverage'])
-        if position_amt != 0:
-            print(position, flush=True)
-            opened_possition.append(position)
-            print(f"Symbol: {symbol}, Position: {position_amt}, Entry Price: {entry_price}, Unrealized PnL: {unrealized_pnl}, Leverage: {leverage}", flush=True)
+        try:
+            symbol = position.get('symbol', '')
+            if not symbol:
+                continue
+                
+            position_amt = float(position.get('positionAmt', 0))
+            
+            # Chỉ xử lý position có amount khác 0
+            if position_amt != 0:
+                # Sử dụng .get() với giá trị mặc định để tránh KeyError
+                entry_price = float(position.get('entryPrice', 0))
+                unrealized_pnl = float(position.get('unrealizedProfit', 0))
+                leverage = int(position.get('leverage', 1))
+                
+                print(position, flush=True)
+                opened_possition.append(position)
+                print(f"Symbol: {symbol}, Position: {position_amt}, Entry Price: {entry_price}, Unrealized PnL: {unrealized_pnl}, Leverage: {leverage}", flush=True)
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"Lỗi khi xử lý position: {position.get('symbol', 'UNKNOWN')} - {e}")
+            continue
+            
     return opened_possition
 
 result_old = []
