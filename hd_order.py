@@ -92,20 +92,61 @@ def cancel_existing_trailing_stop_orders(symbol):
     try:
         open_orders = exchange.fetch_open_orders(symbol=symbol)
         cancelled_count = 0
+        orders_to_cancel = []
         
+        # Bước 1: Thu thập tất cả order TRAILING_STOP cần hủy
         for order in open_orders:
-            # Chỉ hủy order TRAILING_STOP (Lệnh 1)
-            order_type = order.get('type', '') or order.get('info', {}).get('orderType', '')
-            if 'TRAILING_STOP' in str(order_type).upper():
-                try:
-                    order_id = order.get('id') or order.get('info', {}).get('algoId') or order.get('info', {}).get('orderId')
-                    if order_id:
-                        exchange.cancel_order(str(order_id), symbol)
-                        cancelled_count += 1
-                        logger.info(f"Đã hủy order TRAILING_STOP cũ: {symbol} - Order ID: {order_id}")
-                        print(f"🗑️  Đã hủy order TRAILING_STOP cũ cho {symbol}: {order_id}", flush=True)
-                except Exception as e:
-                    logger.warning(f"Không thể hủy order {order_id} cho {symbol}: {e}")
+            # Check nhiều trường để detect TRAILING_STOP
+            order_type = order.get('type', '')
+            order_type_info = order.get('info', {}).get('orderType', '')
+            algo_type = order.get('info', {}).get('algoType', '')
+            order_type_raw = order.get('info', {}).get('type', '')
+            
+            # Kiểm tra tất cả các trường có chứa "TRAILING"
+            is_trailing = (
+                'TRAILING' in str(order_type).upper() or
+                'TRAILING' in str(order_type_info).upper() or
+                'TRAILING' in str(algo_type).upper() or
+                'TRAILING' in str(order_type_raw).upper()
+            )
+            
+            if is_trailing:
+                order_id = order.get('id') or order.get('info', {}).get('algoId') or order.get('info', {}).get('orderId')
+                if order_id:
+                    orders_to_cancel.append(order_id)
+                    logger.info(f"Phát hiện order TRAILING_STOP cần hủy: {symbol} - Order ID: {order_id} - Type: {order_type}/{order_type_info}/{algo_type}")
+        
+        # Bước 2: Hủy từng order
+        for order_id in orders_to_cancel:
+            try:
+                exchange.cancel_order(str(order_id), symbol)
+                cancelled_count += 1
+                logger.info(f"✅ Đã hủy order TRAILING_STOP: {symbol} - Order ID: {order_id}")
+                print(f"🗑️  Đã hủy order TRAILING_STOP cũ cho {symbol}: {order_id}", flush=True)
+            except Exception as e:
+                logger.warning(f"⚠️ Không thể hủy order {order_id} cho {symbol}: {e}")
+        
+        # Bước 3: Verify đã hủy thành công (chờ và kiểm tra lại)
+        if cancelled_count > 0:
+            time.sleep(1.5)  # Chờ Binance xử lý
+            
+            # Kiểm tra lại xem còn order nào không
+            remaining_orders = exchange.fetch_open_orders(symbol=symbol)
+            remaining_trailing = 0
+            for order in remaining_orders:
+                order_type = order.get('type', '')
+                order_type_info = order.get('info', {}).get('orderType', '')
+                algo_type = order.get('info', {}).get('algoType', '')
+                
+                if 'TRAILING' in str(order_type).upper() or 'TRAILING' in str(order_type_info).upper() or 'TRAILING' in str(algo_type).upper():
+                    remaining_trailing += 1
+                    logger.warning(f"⚠️ Còn order TRAILING_STOP sau khi hủy: {symbol} - Order ID: {order.get('id')}")
+            
+            if remaining_trailing > 0:
+                logger.warning(f"⚠️ {symbol}: Còn {remaining_trailing} order TRAILING_STOP sau khi hủy!")
+                print(f"⚠️ {symbol}: Còn {remaining_trailing} order TRAILING_STOP chưa hủy được!", flush=True)
+            else:
+                logger.info(f"✅ {symbol}: Đã hủy sạch tất cả {cancelled_count} order TRAILING_STOP")
         
         return cancelled_count
     except Exception as e:
@@ -324,8 +365,9 @@ def do_it():
             cancelled = cancel_existing_trailing_stop_orders(sym)
             if cancelled > 0:
                 print(f"🧹 Đã hủy {cancelled} order TRAILING_STOP cũ của {sym}", flush=True)
-                # Chờ một chút để Binance xử lý việc hủy order
-                time.sleep(0.5)
+                # Chờ 2 giây để Binance xử lý hoàn tất việc hủy order
+                time.sleep(2.0)
+                logger.info(f"Đã chờ 2s sau khi hủy {cancelled} order của {sym}")
             
             print(f"🎯 Vào lệnh 1 {state_value}: {sym} (Leverage {d[leverage_idx]}x)", flush=True)
             logger.info(f"--- Vào lệnh 1 {state_value}: {sym} TRAILING_STOP đòn bẩy: {d[leverage_idx]}")
