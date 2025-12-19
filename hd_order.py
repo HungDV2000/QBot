@@ -90,16 +90,25 @@ def has_position(sym):
 def has_pending_trailing_stop_order(symbol):
     """Kiểm tra symbol đã có order TRAILING_STOP pending chưa"""
     try:
-        # BƯỚC 1: Kiểm tra Basic orders (thông thường)
+        # Lấy tất cả open orders (bao gồm cả algo orders)
         open_orders = exchange.fetch_open_orders(symbol=symbol)
         
+        if not open_orders:
+            return False
+        
         for order in open_orders:
+            # Lấy thông tin từ order
+            info = order.get('info', {})
+            order_id = order.get('id', 'N/A')
+            algo_id = info.get('algoId', None)
+            
             # Check nhiều trường để detect TRAILING_STOP
             order_type = order.get('type', '')
-            order_type_info = order.get('info', {}).get('orderType', '')
-            algo_type = order.get('info', {}).get('algoType', '')
-            order_type_raw = order.get('info', {}).get('type', '')
+            order_type_info = info.get('orderType', '')
+            algo_type = info.get('algoType', '')
+            order_type_raw = info.get('type', '')
             
+            # Kiểm tra tất cả các trường có chứa "TRAILING"
             is_trailing = (
                 'TRAILING' in str(order_type).upper() or
                 'TRAILING' in str(order_type_info).upper() or
@@ -107,36 +116,17 @@ def has_pending_trailing_stop_order(symbol):
                 'TRAILING' in str(order_type_raw).upper()
             )
             
-            if is_trailing:
-                order_id = order.get('id') or order.get('info', {}).get('algoId')
-                activation_price = order.get('info', {}).get('activatePrice', 'N/A')
-                callback_rate = order.get('info', {}).get('callbackRate', 'N/A')
-                
-                logger.info(f"✅ {symbol} đã có order TRAILING_STOP (Basic) - Order ID: {order_id}, Activation: {activation_price}, Callback: {callback_rate}")
-                return True
-        
-        # BƯỚC 2: Kiểm tra Algo/Conditional orders (QUAN TRỌNG!)
-        # TRAILING_STOP thường nằm trong Conditional orders
-        try:
-            # Lấy tất cả algo orders đang pending
-            algo_orders = exchange.fapiPrivateGetAlgoOpenOrders({'symbol': symbol.replace('/', '')})
+            # Hoặc kiểm tra nếu có algoId (đây là algo order)
+            # VP = Volume Participation (Binance's TRAILING_STOP)
+            is_algo_trailing = (algo_id is not None and algo_type == 'VP')
             
-            if 'orders' in algo_orders and algo_orders['orders']:
-                for order in algo_orders['orders']:
-                    algo_type = order.get('algoType', '')
-                    
-                    # VP = Volume Participation (TRAILING_STOP type)
-                    if algo_type == 'VP':
-                        algo_id = order.get('algoId', 'N/A')
-                        activation_price = order.get('activatePrice', 'N/A')
-                        callback_rate = order.get('callbackRate', 'N/A')
-                        
-                        logger.info(f"✅ {symbol} đã có Algo order TRAILING_STOP (Conditional) - Algo ID: {algo_id}, Activation: {activation_price}, Callback: {callback_rate}")
-                        print(f"⏭️  {symbol} đã có Algo order TRAILING_STOP (Conditional), bỏ qua", flush=True)
-                        return True
-        except Exception as algo_error:
-            # Nếu không có quyền truy cập algo orders hoặc API lỗi, log warning nhưng không crash
-            logger.warning(f"Không thể kiểm tra algo orders cho {symbol}: {algo_error}")
+            if is_trailing or is_algo_trailing:
+                activation_price = info.get('activatePrice', 'N/A')
+                callback_rate = info.get('callbackRate', 'N/A')
+                
+                logger.info(f"✅ {symbol} đã có order TRAILING_STOP - Order ID: {order_id}, Algo ID: {algo_id}, Activation: {activation_price}, Callback: {callback_rate}")
+                print(f"⏭️  {symbol} đã có lệnh chờ TRAILING_STOP, bỏ qua", flush=True)
+                return True
         
         return False
     except Exception as e:
