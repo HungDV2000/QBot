@@ -4,6 +4,10 @@ from datetime import datetime
 import sys
 import os
 import time
+import requests
+import hmac
+import hashlib
+import urllib.parse
 
 # --- CẤU HÌNH LOG ---
 class TeeOutput:
@@ -142,12 +146,35 @@ for symbol in target_symbols:
                 
                 # Timestamps
                 print(f"\n      ⏰ Timestamps:")
-                if info.get('time'):
-                    print(f"         - time (create): {datetime.fromtimestamp(info['time']/1000) if info.get('time') else 'N/A'}")
-                if info.get('updateTime'):
-                    print(f"         - updateTime: {datetime.fromtimestamp(info['updateTime']/1000) if info.get('updateTime') else 'N/A'}")
-                if info.get('createTime'):
-                    print(f"         - createTime: {datetime.fromtimestamp(info['createTime']/1000) if info.get('createTime') else 'N/A'}")
+                try:
+                    if info.get('time'):
+                        time_val = info.get('time')
+                        if isinstance(time_val, (int, float)):
+                            print(f"         - time (create): {datetime.fromtimestamp(time_val/1000)}")
+                        else:
+                            print(f"         - time (create): {time_val} (raw value)")
+                except Exception as e:
+                    print(f"         - time (create): Error converting - {e}")
+                
+                try:
+                    if info.get('updateTime'):
+                        update_time = info.get('updateTime')
+                        if isinstance(update_time, (int, float)):
+                            print(f"         - updateTime: {datetime.fromtimestamp(update_time/1000)}")
+                        else:
+                            print(f"         - updateTime: {update_time} (raw value)")
+                except Exception as e:
+                    print(f"         - updateTime: Error converting - {e}")
+                
+                try:
+                    if info.get('createTime'):
+                        create_time = info.get('createTime')
+                        if isinstance(create_time, (int, float)):
+                            print(f"         - createTime: {datetime.fromtimestamp(create_time/1000)}")
+                        else:
+                            print(f"         - createTime: {create_time} (raw value)")
+                except Exception as e:
+                    print(f"         - createTime: Error converting - {e}")
                 
                 # Tính toán USDT value
                 try:
@@ -179,9 +206,47 @@ print(f"\n\n{'='*80}")
 print("📋 TEST 2: Dùng Binance Algo Orders API (/fapi/v1/algo/...)")
 print(f"{'='*80}\n")
 
+def call_binance_api_direct(method, endpoint, params=None):
+    """
+    Gọi Binance API trực tiếp bằng requests (nếu CCXT không hỗ trợ)
+    """
+    base_url = 'https://fapi.binance.com'
+    url = f"{base_url}{endpoint}"
+    
+    if params is None:
+        params = {}
+    
+    # Thêm timestamp
+    params['timestamp'] = int(time.time() * 1000)
+    
+    # Tạo query string
+    query_string = urllib.parse.urlencode(params)
+    
+    # Tạo signature
+    signature = hmac.new(
+        cst.secret_binance.encode('utf-8'),
+        query_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    
+    params['signature'] = signature
+    
+    # Headers
+    headers = {
+        'X-MBX-APIKEY': cst.key_binance
+    }
+    
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"  ❌ Lỗi khi gọi API trực tiếp: {e}")
+        return None
+
 def get_algo_orders_via_fapi(symbol=None, is_open=True, use_all_algo_orders=False):
     """
-    Lấy algo orders qua Binance API trực tiếp
+    Lấy algo orders qua Binance API
     USDS-M Futures endpoints:
     - Open: /fapi/v1/openAlgoOrders (Current All Algo Open Orders)
     - All: /fapi/v1/allAlgoOrders (Query All Algo Orders - bao gồm cả history)
@@ -195,45 +260,56 @@ def get_algo_orders_via_fapi(symbol=None, is_open=True, use_all_algo_orders=Fals
             # Dùng /fapi/v1/allAlgoOrders - Query All Algo Orders
             # Symbol: YES (mandatory)
             # Request weight: 5
-            # Có thể có algoId, startTime, endTime
             if not symbol:
                 print(f"  ⚠️  allAlgoOrders cần symbol (mandatory), bỏ qua")
                 return []
-            response = exchange.fapiPrivateGetAlgoAllOrders(params)
-            print(f"  ✅ Lấy all algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
+            
+            # Dùng API trực tiếp vì CCXT có thể không hỗ trợ
+            response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
+            if response:
+                print(f"  ✅ Lấy all algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
+            else:
+                return []
+                    
         elif is_open:
             # Lấy open algo orders - /fapi/v1/openAlgoOrders
             # Symbol: NO (optional)
             # Request weight: 1 (single) hoặc 40 (all)
-            response = exchange.fapiPrivateGetAlgoOpenOrders(params)
-            print(f"  ✅ Lấy open algo orders thành công (endpoint: /fapi/v1/openAlgoOrders)")
+            response = call_binance_api_direct('GET', '/fapi/v1/openAlgoOrders', params)
+            if response:
+                print(f"  ✅ Lấy open algo orders thành công (endpoint: /fapi/v1/openAlgoOrders)")
+            else:
+                return []
         else:
-            # Thử dùng historicalOrders nếu có
-            params['limit'] = 50
-            try:
-                response = exchange.fapiPrivateGetAlgoHistoricalOrders(params)
-                print(f"  ✅ Lấy historical algo orders thành công (endpoint: /fapi/v1/algo/historicalOrders)")
-            except:
-                # Fallback: dùng allAlgoOrders thay vì historicalOrders
-                if not symbol:
-                    print(f"  ⚠️  Cần symbol để lấy historical orders, bỏ qua")
-                    return []
-                response = exchange.fapiPrivateGetAlgoAllOrders(params)
+            # Thử dùng allAlgoOrders thay vì historicalOrders
+            if not symbol:
+                print(f"  ⚠️  Cần symbol để lấy historical orders, bỏ qua")
+                return []
+            response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
+            if response:
                 print(f"  ✅ Lấy algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
+            else:
+                return []
         
-        # Binance trả về: {"code": 200, "msg": "", "data": [...]}
-        if 'data' in response:
-            return response['data']
-        elif isinstance(response, list):
-            return response
-        else:
-            print(f"  ⚠️  Response format không đúng: {list(response.keys()) if isinstance(response, dict) else type(response)}")
+        if not response:
             return []
-    except AttributeError as e:
-        print(f"  ❌ API method không tồn tại: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
+        
+        # Binance trả về có thể là array hoặc dict
+        if isinstance(response, list):
+            return response
+        elif isinstance(response, dict):
+            if 'data' in response:
+                return response['data']
+            elif response.get('code') == 200:
+                # Có thể data nằm trực tiếp
+                return response
+            else:
+                print(f"  ⚠️  Response có code khác 200: {response}")
+                return []
+        else:
+            print(f"  ⚠️  Response format không đúng: {type(response)}")
+            return []
+            
     except Exception as e:
         print(f"  ❌ Lỗi: {e}")
         import traceback
