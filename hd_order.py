@@ -91,12 +91,24 @@ def has_pending_trailing_stop_order(symbol):
     """Kiểm tra symbol đã có order TRAILING_STOP pending chưa"""
     try:
         # Lấy tất cả open orders (bao gồm cả algo orders)
-        open_orders = exchange.fetch_open_orders(symbol=symbol)
+        # Không chỉ định symbol để lấy tất cả, sau đó filter
+        all_open_orders = exchange.fetch_open_orders()
         
-        if not open_orders:
+        if not all_open_orders:
             return False
         
-        for order in open_orders:
+        # Filter orders theo symbol
+        symbol_orders = []
+        for order in all_open_orders:
+            order_symbol = order.get('symbol', '')
+            # So sánh symbol (có thể có :USDT hoặc không)
+            if is_same_pair(order_symbol, symbol):
+                symbol_orders.append(order)
+        
+        if not symbol_orders:
+            return False
+        
+        for order in symbol_orders:
             # Lấy thông tin từ order
             info = order.get('info', {})
             order_id = order.get('id', 'N/A')
@@ -107,6 +119,8 @@ def has_pending_trailing_stop_order(symbol):
             order_type_info = info.get('orderType', '')
             algo_type = info.get('algoType', '')
             order_type_raw = info.get('type', '')
+            activate_price = info.get('activatePrice', None)
+            callback_rate = info.get('callbackRate', None)
             
             # Kiểm tra tất cả các trường có chứa "TRAILING"
             is_trailing = (
@@ -116,15 +130,15 @@ def has_pending_trailing_stop_order(symbol):
                 'TRAILING' in str(order_type_raw).upper()
             )
             
-            # Hoặc kiểm tra nếu có algoId (đây là algo order)
+            # Nếu có algoId (bất kỳ algo order nào) HOẶC có activatePrice (dấu hiệu của algo order)
             # VP = Volume Participation (Binance's TRAILING_STOP)
-            is_algo_trailing = (algo_id is not None and algo_type == 'VP')
+            is_algo_trailing = (
+                (algo_id is not None) or  # Có algoId = algo order
+                (activate_price is not None and callback_rate is not None)  # Có activatePrice + callbackRate = TRAILING_STOP
+            )
             
             if is_trailing or is_algo_trailing:
-                activation_price = info.get('activatePrice', 'N/A')
-                callback_rate = info.get('callbackRate', 'N/A')
-                
-                logger.info(f"✅ {symbol} đã có order TRAILING_STOP - Order ID: {order_id}, Algo ID: {algo_id}, Activation: {activation_price}, Callback: {callback_rate}")
+                logger.info(f"✅ {symbol} đã có order TRAILING_STOP - Order ID: {order_id}, Algo ID: {algo_id}, Activation: {activate_price}, Callback: {callback_rate}")
                 print(f"⏭️  {symbol} đã có lệnh chờ TRAILING_STOP, bỏ qua", flush=True)
                 return True
         
@@ -388,6 +402,10 @@ def do_it():
             # CHỈ HỖ TRỢ TRAILING STOP (theo quy trình thực tế)
             activation_price_raw = float(str(d[activation_idx]).replace("%", ""))
             
+            # Log giá trị raw trước khi làm tròn
+            logger.info(f"[ACTIVATION PRICE] {symbol} - Giá gốc từ sheet: {activation_price_raw}")
+            print(f"📊 {symbol} - Giá kích hoạt gốc: {activation_price_raw}", flush=True)
+            
             # Validate activation_price > 0 TRƯỚC KHI làm tròn
             if activation_price_raw <= 0:
                 print(f"⚠️  {symbol}: Activation price = {activation_price_raw} (phải > 0), bỏ qua", flush=True)
@@ -398,6 +416,8 @@ def do_it():
             try:
                 activation_price_str = exchange.price_to_precision(symbol, activation_price_raw)
                 activation_price = float(activation_price_str)
+                logger.info(f"[ACTIVATION PRICE] {symbol} - Sau khi price_to_precision(): {activation_price} (từ string: '{activation_price_str}')")
+                print(f"📊 {symbol} - Giá sau khi làm tròn (price_to_precision): {activation_price}", flush=True)
             except Exception as e:
                 # Fallback: dùng round nếu price_to_precision lỗi
                 try:
