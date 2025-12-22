@@ -44,10 +44,12 @@ exchange = exchange_class({
     'apiKey': cst.key_binance,
     'secret': cst.secret_binance,
     'options': {
-        'defaultType': 'future' 
+        'defaultType': 'future',
+        'warnOnFetchOpenOrdersWithoutSymbol': False  # Suppress warning về rate limit
     }
 })
 exchange.setSandboxMode(False)
+print(f"✅ Đã khởi tạo exchange: {exchange_id} (defaultType: future)")
 
 def check_all_orders():
     """Kiểm tra TẤT CẢ orders (Basic + Conditional)"""
@@ -60,58 +62,90 @@ def check_all_orders():
     conditional_orders = []
     
     # BƯỚC 1: Lấy TẤT CẢ ORDERS (chỉ gọi 1 lần)
+    print("="*80)
+    print("BƯỚC 1: LẤY TẤT CẢ OPEN ORDERS")
+    print("="*80)
     try:
-        print("📥 Đang lấy tất cả Open Orders...")
+        print("📥 [STEP 1.1] Gọi exchange.fetch_open_orders()...")
         all_open_orders = exchange.fetch_open_orders()
-        print(f"✅ Lấy được {len(all_open_orders)} orders tổng cộng\n")
+        print(f"✅ [STEP 1.2] Lấy được {len(all_open_orders)} orders tổng cộng")
+        print(f"📋 [STEP 1.3] Type của all_open_orders: {type(all_open_orders)}")
+        print(f"📋 [STEP 1.4] Is list: {isinstance(all_open_orders, list)}")
+        if all_open_orders:
+            print(f"📋 [STEP 1.5] Sample first order keys: {list(all_open_orders[0].keys()) if all_open_orders else 'N/A'}")
+        print()
         
         # BƯỚC 2: Phân loại Basic vs Conditional
-        print("📊 Đang phân loại orders...")
+        print("="*80)
+        print("BƯỚC 2: PHÂN LOẠI ORDERS")
+        print("="*80)
+        print("📊 [STEP 2.1] Bắt đầu phân loại orders...")
+        print(f"📊 [STEP 2.2] Số lượng orders cần xử lý: {len(all_open_orders)}")
         
-        for order in all_open_orders:
-            info = order.get('info', {})
-            algo_id = info.get('algoId', None)
-            symbol = order.get('symbol', 'N/A')
-            
-            if algo_id is None:
-                # BASIC ORDER (không có algoId)
-                order_id = order.get('id', 'N/A')
-                order_type = order.get('type', 'N/A')
-                side = order.get('side', 'N/A')
-                price = order.get('price', 'N/A')
+        for idx, order in enumerate(all_open_orders, 1):
+            print(f"   [ORDER {idx}/{len(all_open_orders)}] Đang xử lý order...")
+            try:
+                info = order.get('info', {})
+                print(f"      → info type: {type(info)}, keys: {list(info.keys()) if isinstance(info, dict) else 'N/A'}")
                 
-                basic_orders.append({
-                    'symbol': symbol,
-                    'id': order_id,
-                    'type': order_type,
-                    'side': side,
-                    'price': price
-                })
-            else:
-                # CONDITIONAL ORDER (có algoId)
-                algo_type = info.get('algoType', 'N/A')  # VP = TRAILING_STOP
-                side = order.get('side', 'N/A')
-                activation_price = info.get('activatePrice', 'N/A')
-                callback_rate = info.get('callbackRate', 'N/A')
+                algo_id = info.get('algoId', None)
+                symbol = order.get('symbol', 'N/A')
+                print(f"      → Symbol: {symbol}, algoId: {algo_id}")
                 
-                conditional_orders.append({
-                    'symbol': symbol,
-                    'algoId': algo_id,
-                    'algoType': algo_type,
-                    'side': side,
-                    'activation': activation_price,
-                    'callback': callback_rate,
-                    'order_id': order.get('id', 'N/A')
-                })
-            
-            all_symbols.add(symbol)
+                if algo_id is None:
+                    # BASIC ORDER (không có algoId)
+                    print(f"      → ✅ BASIC ORDER")
+                    order_id = order.get('id', 'N/A')
+                    order_type = order.get('type', 'N/A')
+                    side = order.get('side', 'N/A')
+                    price = order.get('price', 'N/A')
+                    
+                    basic_orders.append({
+                        'symbol': symbol,
+                        'id': order_id,
+                        'type': order_type,
+                        'side': side,
+                        'price': price
+                    })
+                else:
+                    # CONDITIONAL ORDER (có algoId)
+                    print(f"      → ✅ CONDITIONAL ORDER (algoId: {algo_id})")
+                    algo_type = info.get('algoType', 'N/A')  # VP = TRAILING_STOP
+                    side = order.get('side', 'N/A')
+                    activation_price = info.get('activatePrice', 'N/A')
+                    callback_rate = info.get('callbackRate', 'N/A')
+                    print(f"      → AlgoType: {algo_type}, Side: {side}, Activation: {activation_price}, Callback: {callback_rate}")
+                    
+                    conditional_orders.append({
+                        'symbol': symbol,
+                        'algoId': algo_id,
+                        'algoType': algo_type,
+                        'side': side,
+                        'activation': activation_price,
+                        'callback': callback_rate,
+                        'order_id': order.get('id', 'N/A')
+                    })
+                
+                all_symbols.add(symbol)
+            except Exception as e_order:
+                print(f"      → ❌ LỖI khi xử lý order {idx}: {e_order}")
+                import traceback
+                traceback.print_exc()
+                continue
         
+        print(f"\n✅ [STEP 2.3] Hoàn thành phân loại:")
         print(f"   - Basic orders: {len(basic_orders)}")
-        print(f"   - Conditional (Algo) orders: {len(conditional_orders)}\n")
+        print(f"   - Conditional (Algo) orders: {len(conditional_orders)}")
+        print(f"   - Tổng số symbols: {len(all_symbols)}\n")
+        
     except Exception as e:
-        print(f"❌ Lỗi khi lấy orders: {e}\n")
+        print(f"\n❌ [LỖI] Exception khi lấy orders:")
+        print(f"   Error type: {type(e).__name__}")
+        print(f"   Error message: {str(e)}")
+        print(f"\n📋 [TRACEBACK]:")
         import traceback
         traceback.print_exc()
+        print()
     
     # IN KẾT QUẢ
     print(f"{'='*100}")
