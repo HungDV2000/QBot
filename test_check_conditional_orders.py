@@ -83,20 +83,58 @@ def check_all_orders():
         print(f"📊 [STEP 2.2] Số lượng orders cần xử lý: {len(all_open_orders)}")
         
         for idx, order in enumerate(all_open_orders, 1):
-            print(f"   [ORDER {idx}/{len(all_open_orders)}] Đang xử lý order...")
             try:
                 info = order.get('info', {})
-                print(f"      → info type: {type(info)}, keys: {list(info.keys()) if isinstance(info, dict) else 'N/A'}")
                 
                 algo_id = info.get('algoId', None)
                 symbol = order.get('symbol', 'N/A')
-                print(f"      → Symbol: {symbol}, algoId: {algo_id}")
+                order_type = order.get('type', 'N/A')
+                activate_price = info.get('activatePrice', None)
+                callback_rate = info.get('callbackRate', None)
+                price_rate = info.get('priceRate', None)
+                algo_type = info.get('algoType', None)
                 
-                if algo_id is None:
-                    # BASIC ORDER (không có algoId)
-                    print(f"      → ✅ BASIC ORDER")
+                # Chỉ log chi tiết cho 5 orders đầu tiên để debug
+                if idx <= 5:
+                    print(f"   [ORDER {idx}/{len(all_open_orders)}] {symbol} - Type: {order_type}, algoId: {algo_id}, activatePrice: {activate_price}")
+                
+                # Logic phân loại: Conditional order nếu có BẤT KỲ dấu hiệu nào sau:
+                # 1. Có algoId
+                # 2. Type chứa 'trailing' 
+                # 3. Có activatePrice (dấu hiệu của algo/conditional order)
+                # 4. Có algoType
+                is_conditional = (
+                    algo_id is not None or
+                    'trailing' in str(order_type).lower() or
+                    activate_price is not None or
+                    algo_type is not None
+                )
+                
+                if is_conditional:
+                    # CONDITIONAL ORDER (Algo order)
+                    if idx <= 5:
+                        print(f"      → ✅ CONDITIONAL ORDER")
+                    side = order.get('side', 'N/A')
+                    # Dùng callbackRate hoặc priceRate
+                    callback_value = callback_rate if callback_rate is not None else price_rate
+                    
+                    conditional_orders.append({
+                        'symbol': symbol,
+                        'algoId': algo_id if algo_id is not None else 'N/A',
+                        'algoType': algo_type if algo_type is not None else 'N/A',
+                        'order_type': order_type,
+                        'side': side,
+                        'activation': activate_price if activate_price is not None else 'N/A',
+                        'callback': callback_value if callback_value is not None else 'N/A',
+                        'order_id': order.get('id', 'N/A')
+                    })
+                    if idx <= 5:
+                        print(f"      → AlgoId: {algo_id}, Type: {order_type}, Activation: {activate_price}, Callback: {callback_value}")
+                else:
+                    # BASIC ORDER
+                    if idx <= 5:
+                        print(f"      → ✅ BASIC ORDER")
                     order_id = order.get('id', 'N/A')
-                    order_type = order.get('type', 'N/A')
                     side = order.get('side', 'N/A')
                     price = order.get('price', 'N/A')
                     
@@ -107,33 +145,15 @@ def check_all_orders():
                         'side': side,
                         'price': price
                     })
-                else:
-                    # CONDITIONAL ORDER (có algoId)
-                    print(f"      → ✅ CONDITIONAL ORDER (algoId: {algo_id})")
-                    algo_type = info.get('algoType', 'N/A')  # VP = TRAILING_STOP
-                    side = order.get('side', 'N/A')
-                    activation_price = info.get('activatePrice', 'N/A')
-                    callback_rate = info.get('callbackRate', 'N/A')
-                    print(f"      → AlgoType: {algo_type}, Side: {side}, Activation: {activation_price}, Callback: {callback_rate}")
-                    
-                    conditional_orders.append({
-                        'symbol': symbol,
-                        'algoId': algo_id,
-                        'algoType': algo_type,
-                        'side': side,
-                        'activation': activation_price,
-                        'callback': callback_rate,
-                        'order_id': order.get('id', 'N/A')
-                    })
                 
                 all_symbols.add(symbol)
             except Exception as e_order:
-                print(f"      → ❌ LỖI khi xử lý order {idx}: {e_order}")
+                print(f"   ❌ [ORDER {idx}] LỖI khi xử lý: {e_order}")
                 import traceback
                 traceback.print_exc()
                 continue
         
-        print(f"\n✅ [STEP 2.3] Hoàn thành phân loại:")
+        print(f"\n✅ [STEP 2.3] Đã xử lý xong {len(all_open_orders)} orders")
         print(f"   - Basic orders: {len(basic_orders)}")
         print(f"   - Conditional (Algo) orders: {len(conditional_orders)}")
         print(f"   - Tổng số symbols: {len(all_symbols)}\n")
@@ -178,8 +198,10 @@ def check_all_orders():
         
         for i, order in enumerate(conditional_orders, 1):
             print(f"[{i}] {order['symbol']}")
+            print(f"    Order ID: {order['order_id']}")
+            print(f"    Order Type: {order['order_type']}")
             print(f"    Algo ID: {order['algoId']}")
-            print(f"    Type: {order['algoType']} {'← TRAILING_STOP' if order['algoType'] == 'VP' else ''}")
+            print(f"    Algo Type: {order['algoType']} {'← VP = TRAILING_STOP' if order['algoType'] == 'VP' else ''}")
             print(f"    Side: {order['side']}")
             print(f"    Activation: {order['activation']}")
             print(f"    Callback: {order['callback']}")
@@ -222,7 +244,12 @@ def check_all_orders():
             if orders['conditional']:
                 print(f"   - Conditional orders ({len(orders['conditional'])}):")
                 for order in orders['conditional']:
-                    print(f"      • Algo ID: {order['algoId']}, Type: {order['algoType']}, Activation: {order['activation']}, Callback: {order['callback']}")
+                    algo_id = order.get('algoId', 'N/A')
+                    algo_type = order.get('algoType', 'N/A')
+                    order_type = order.get('order_type', 'N/A')
+                    activation = order.get('activation', 'N/A')
+                    callback = order.get('callback', 'N/A')
+                    print(f"      • Order Type: {order_type}, Algo ID: {algo_id}, AlgoType: {algo_type}, Activation: {activation}, Callback: {callback}")
             print()
     
     if not duplicates_found:
@@ -235,7 +262,10 @@ def check_all_orders():
     
     trailing_symbols = {}
     for order in conditional_orders:
-        if order['algoType'] == 'VP':  # VP = TRAILING_STOP
+        # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
+        order_type = order.get('order_type', '')
+        algo_type = order.get('algoType', '')
+        if 'trailing' in str(order_type).lower() or algo_type == 'VP':
             sym = order['symbol']
             if sym not in trailing_symbols:
                 trailing_symbols[sym] = []
@@ -247,7 +277,11 @@ def check_all_orders():
             trailing_duplicates = True
             print(f"❌ {symbol}: Có {len(orders)} TRAILING_STOP orders trùng lặp!")
             for i, order in enumerate(orders, 1):
-                print(f"   [{i}] Algo ID: {order['algoId']}, Activation: {order['activation']}, Callback: {order['callback']}")
+                algo_id = order.get('algoId', 'N/A')
+                activation = order.get('activation', 'N/A')
+                callback = order.get('callback', 'N/A')
+                order_type = order.get('order_type', 'N/A')
+                print(f"   [{i}] Order Type: {order_type}, Algo ID: {algo_id}, Activation: {activation}, Callback: {callback}")
             print()
     
     if not trailing_duplicates:
@@ -265,10 +299,10 @@ if __name__ == "__main__":
         print(f"3. Nếu thấy '✅ KHÔNG CÓ LẶP ĐƠN' → Logic mới đã hoạt động tốt!")
         print(f"4. Chạy lại script này định kỳ để kiểm tra")
         print(f"\n💡 NOTE:")
-        print(f"   - TRAILING_STOP orders có algoType = 'VP' (Volume Participation)")
-        print(f"   - Chúng nằm trong tab 'Conditional' trên Binance UI")
-        print(f"   - fetch_open_orders() với defaultType='future' TRẢ VỀ CẢ algo orders!")
-        print(f"   - Phân biệt bằng cách check order['info']['algoId'] != None")
+        print(f"   - Conditional/Algo orders được nhận diện bằng: algoId, order_type chứa 'trailing', activatePrice, hoặc algoType")
+        print(f"   - TRAILING_STOP orders có order_type = 'trailing_stop_market' hoặc algoType = 'VP'")
+        print(f"   - fetch_open_orders() trả về cả Basic và Conditional orders")
+        print(f"   - Nhiều TRAILING_STOP orders không có algoId nhưng vẫn là Conditional orders")
         print(f"\n📝 Kết quả đã được ghi vào file: {log_file_path}\n")
     except Exception as e:
         print(f"❌ LỖI KHI CHẠY SCRIPT: {e}")
