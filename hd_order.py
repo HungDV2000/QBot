@@ -112,6 +112,7 @@ def has_pending_trailing_stop_order(symbol):
             return False
         
         # Đếm số lượng TRAILING_STOP orders cho symbol này
+        # Logic theo test_check_conditional_orders.py: TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
         trailing_stop_count = 0
         trailing_stop_details = []
         
@@ -126,38 +127,25 @@ def has_pending_trailing_stop_order(symbol):
             callback_rate = info.get('callbackRate', None)
             price_rate = info.get('priceRate', None)
             
-            # Logic phân loại Conditional order (theo test_check_conditional_orders.py):
-            # Conditional order nếu có BẤT KỲ dấu hiệu nào sau:
-            # 1. Có algoId
-            # 2. Type chứa 'trailing' 
-            # 3. Có activatePrice (dấu hiệu của algo/conditional order)
-            # 4. Có algoType
-            is_conditional = (
-                algo_id is not None or
+            # Kiểm tra TRAILING_STOP (theo logic test_check_conditional_orders.py):
+            # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
+            # Không cần kiểm tra is_conditional trước vì chỉ cần detect TRAILING_STOP
+            is_trailing_stop = (
                 'trailing' in str(order_type).lower() or
-                activate_price is not None or
-                algo_type is not None
+                algo_type == 'VP'
             )
             
-            if is_conditional:
-                # Kiểm tra xem có phải TRAILING_STOP không
-                # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
-                is_trailing_stop = (
-                    'trailing' in str(order_type).lower() or
-                    algo_type == 'VP'
-                )
-                
-                if is_trailing_stop:
-                    trailing_stop_count += 1
-                    trailing_stop_details.append({
-                        'order_id': order_id,
-                        'algo_id': algo_id,
-                        'order_type': order_type,
-                        'algo_type': algo_type,
-                        'activation': activate_price,
-                        'callback': callback_rate if callback_rate is not None else price_rate,
-                        'status': order.get('status', 'N/A')
-                    })
+            if is_trailing_stop:
+                trailing_stop_count += 1
+                trailing_stop_details.append({
+                    'order_id': order_id,
+                    'algo_id': algo_id,
+                    'order_type': order_type,
+                    'algo_type': algo_type,
+                    'activation': activate_price,
+                    'callback': callback_rate if callback_rate is not None else price_rate,
+                    'status': order.get('status', 'N/A')
+                })
         
         # Nếu có ít nhất 1 TRAILING_STOP order = đã có order (tránh trùng lặp)
         if trailing_stop_count > 0:
