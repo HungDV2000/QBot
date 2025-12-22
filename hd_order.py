@@ -13,6 +13,10 @@ import binance_utils
 import telegram_factory
 from pathlib import Path
 from binance_order_helper import BinanceOrderHelper, cancel_all_open_orders_with_retry
+import requests
+import hmac
+import hashlib
+import urllib.parse
 
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
@@ -41,8 +45,7 @@ exchange = exchange_class({
     'apiKey': cst.key_binance,
     'secret': cst.secret_binance,
     'options': {
-        'defaultType': 'future',
-        'warnOnFetchOpenOrdersWithoutSymbol': False  # Tắt warning để tránh exception
+        'defaultType': 'future' 
     }
 })
 exchange.setSandboxMode(False)
@@ -57,6 +60,80 @@ def is_same_pair(sym1, sym2):
        return True
     return False
 
+def call_binance_api_direct(method, endpoint, params=None):
+    """
+    Gọi Binance API trực tiếp bằng requests (để lấy algo orders)
+    Tham khảo từ test_fetch_conditional_orders.py
+    """
+    base_url = 'https://fapi.binance.com'
+    url = f"{base_url}{endpoint}"
+    
+    if params is None:
+        params = {}
+    
+    # Thêm timestamp
+    params['timestamp'] = int(time.time() * 1000)
+    
+    # Tạo query string
+    query_string = urllib.parse.urlencode(params)
+    
+    # Tạo signature
+    signature = hmac.new(
+        cst.secret_binance.encode('utf-8'),
+        query_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    
+    params['signature'] = signature
+    
+    # Headers
+    headers = {
+        'X-MBX-APIKEY': cst.key_binance
+    }
+    
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Lỗi khi gọi Binance API trực tiếp: {e}")
+        return None
+
+def get_algo_orders_for_symbol(symbol):
+    """
+    Lấy algo orders cho một symbol cụ thể từ Binance API
+    Dùng endpoint: /fapi/v1/allAlgoOrders (Query All Algo Orders)
+    Trả về: List các algo orders (bao gồm CANCELED, FINISHED, NEW)
+    Tham khảo từ test_fetch_conditional_orders.py
+    """
+    try:
+        params = {
+            'symbol': symbol.replace('/', '')
+        }
+        
+        response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
+        
+        if not response:
+            return []
+        
+        # Binance trả về có thể là array hoặc dict
+        if isinstance(response, list):
+            return response
+        elif isinstance(response, dict):
+            if 'data' in response:
+                return response['data']
+            elif response.get('code') == 200:
+                return response
+            else:
+                logger.warning(f"Response có code khác 200 cho {symbol}: {response}")
+                return []
+        else:
+            logger.warning(f"Response format không đúng cho {symbol}: {type(response)}")
+            return []
+            
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy algo orders cho {symbol}: {e}", exc_info=True)
+        return []
 
 def cancel_all_open_orders(symbol):
     open_orders = exchange.fetch_open_orders(symbol)
@@ -76,12 +153,12 @@ def cancel_all_open_orders(symbol):
 def has_position(sym):
     """Kiểm tra symbol đã có vị thế (đã vào lệnh) chưa"""
     try:
-    balance = exchange.fetch_balance()
+        balance = exchange.fetch_balance()
         if not balance or 'info' not in balance:
             logger.warning(f"fetch_balance() trả về dữ liệu không hợp lệ cho {sym}")
             return False
         positions = balance['info'].get('positions', [])
-    for position in positions:
+        for position in positions:
             symbol = position.get('symbol', '')
             position_amt = position.get('positionAmt', '0')
             if is_same_pair(symbol, sym) and float(position_amt) != 0:
@@ -95,64 +172,62 @@ def has_pending_trailing_stop_order(symbol):
     """
     Kiểm tra symbol đã có order TRAILING_STOP chưa (bất kể pending hay filled)
     Logic: Trùng lặp = cùng 1 mã có nhiều orders cùng loại trong 1 đợt đặt lệnh
+    
+    Dùng Binance Algo Orders API (/fapi/v1/allAlgoOrders) để lấy chính xác algo orders
+    Tham khảo từ test_fetch_conditional_orders.py
     """
     try:
-        # Sử dụng fetch_open_orders(symbol) để tránh rate limit và lấy orders cụ thể cho symbol
-        symbol_orders = exchange.fetch_open_orders(symbol)
+        # Lấy algo orders từ Binance API trực tiếp
+        algo_orders = get_algo_orders_for_symbol(symbol)
         
-        if symbol_orders is None:
-            logger.warning(f"fetch_open_orders({symbol}) trả về None")
+        if not algo_orders:
+            logger.debug(f"{symbol}: Không có algo orders")
             return False
         
-        if not symbol_orders:
+        # Lọc orders có status=NEW (active/pending) - theo test results
+        active_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
+        
+        if not active_orders:
+            logger.debug(f"{symbol}: Không có active algo orders (status=NEW)")
             return False
         
-        # Đếm số lượng TRAILING_STOP orders cho symbol này
-        # Logic theo test_check_conditional_orders.py: TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
+        # Đếm TRAILING_STOP orders
+        # Theo test: algoType='CONDITIONAL' hoặc 'VP' là TRAILING_STOP
         trailing_stop_count = 0
         trailing_stop_details = []
         
-        for order in symbol_orders:
-            # Lấy thông tin từ order
-            info = order.get('info', {})
-            order_id = order.get('id', 'N/A')
-            algo_id = info.get('algoId', None)
-            order_type = order.get('type', '')
-            algo_type = info.get('algoType', None)
-            activate_price = info.get('activatePrice', None)
-            callback_rate = info.get('callbackRate', None)
-            price_rate = info.get('priceRate', None)
+        for order in active_orders:
+            algo_id = order.get('algoId', 'N/A')
+            algo_type = order.get('algoType', '').upper()
+            algo_status = order.get('algoStatus', '')
+            activate_price = order.get('activatePrice', None)
+            callback_rate = order.get('callbackRate', order.get('priceRate', None))
             
-            # Kiểm tra TRAILING_STOP (theo logic test_check_conditional_orders.py):
-            # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
-            is_trailing_stop = (
-                'trailing' in str(order_type).lower() or
-                algo_type == 'VP'
-            )
+            # TRAILING_STOP: algoType = 'CONDITIONAL' hoặc 'VP' (theo test results)
+            is_trailing_stop = algo_type in ['CONDITIONAL', 'VP']
             
             if is_trailing_stop:
                 trailing_stop_count += 1
                 trailing_stop_details.append({
-                    'order_id': order_id,
                     'algo_id': algo_id,
-                    'order_type': order_type,
                     'algo_type': algo_type,
+                    'algo_status': algo_status,
                     'activation': activate_price,
-                    'callback': callback_rate if callback_rate is not None else price_rate,
-                    'status': order.get('status', 'N/A')
+                    'callback': callback_rate
                 })
         
-        # Nếu có ít nhất 1 TRAILING_STOP order = đã có order (tránh trùng lặp)
+        # Nếu có ít nhất 1 TRAILING_STOP order active = đã có order (tránh trùng lặp)
         if trailing_stop_count > 0:
-            detail_str = ", ".join([f"Order ID: {d['order_id']}, Type: {d['order_type']}, Status: {d['status']}" 
+            detail_str = ", ".join([f"AlgoId: {d['algo_id']}, Type: {d['algo_type']}, Status: {d['algo_status']}, Activation: {d['activation']}" 
                                    for d in trailing_stop_details])
-            logger.info(f"✅ {symbol} đã có {trailing_stop_count} TRAILING_STOP order(s) - {detail_str}")
-            print(f"⏭️  {symbol} đã có {trailing_stop_count} lệnh TRAILING_STOP, bỏ qua", flush=True)
-        return True
-  
-    return False
+            logger.info(f"✅ {symbol} đã có {trailing_stop_count} TRAILING_STOP algo order(s) - {detail_str}")
+            print(f"⏭️  {symbol} đã có {trailing_stop_count} lệnh TRAILING_STOP (Algo API), bỏ qua", flush=True)
+            return True
+        
+        return False
+        
     except Exception as e:
-        logger.error(f"Lỗi khi kiểm tra order pending cho {symbol}: {e}", exc_info=True)
+        logger.error(f"Lỗi khi kiểm tra algo orders cho {symbol}: {e}", exc_info=True)
         # Khi có lỗi, return False để không block việc đặt lệnh (sẽ tự fail nếu duplicate)
         return False
 
@@ -186,39 +261,19 @@ def do_it():
     print(f"📌 Trạng thái: {state_value}", flush=True)
     logger.info(f"Đọc trạng thái từ B2: {state_value}")
   except (IndexError, KeyError):
-      state_value = STATE_CHO
+    state_value = STATE_CHO
     print(f"⚠️ Không đọc được trạng thái B2, mặc định CHỜ", flush=True)
     logger.warning("Không đọc được trạng thái từ B2, mặc định CHỜ")
   
   # Đọc vốn mặc định từ E2
-  e2_value = "0"
   try:
-    raw_value = gg_sheet_factory.get_dat_lenh("E2:E2")[0][0].strip()
-    # Kiểm tra giá trị có phải là lỗi Excel/Sheets không (#DIV/0!, #N/A, #ERROR!, etc.)
-    if raw_value.startswith("#") or not is_number(raw_value):
-      print(f"⚠️ Giá trị E2 không hợp lệ: '{raw_value}', dùng mặc định 100", flush=True)
-      logger.warning(f"Giá trị E2 không hợp lệ: '{raw_value}', dùng mặc định 100")
-      e2_value = "100"
-    else:
-      # Thử convert để đảm bảo là số hợp lệ
-      try:
-        test_float = float(raw_value)
-        if test_float <= 0:
-          print(f"⚠️ Giá trị E2 <= 0: '{raw_value}', dùng mặc định 100", flush=True)
-          logger.warning(f"Giá trị E2 <= 0: '{raw_value}', dùng mặc định 100")
-          e2_value = "100"
-        else:
-          e2_value = raw_value
-          print(f"💰 Vốn mặc định: {e2_value} USDT", flush=True)
-          logger.info(f"Vốn mặc định từ E2: {e2_value}")
-      except (ValueError, TypeError):
-        print(f"⚠️ Không thể convert E2 '{raw_value}' sang số, dùng mặc định 100", flush=True)
-        logger.warning(f"Không thể convert E2 '{raw_value}' sang số, dùng mặc định 100")
-        e2_value = "100"
-  except Exception as e:
-    print(f"⚠️ Không đọc được vốn E2: {e}, mặc định 100", flush=True)
-    logger.warning(f"Không đọc được vốn mặc định từ E2: {e}")
-    e2_value = "100"
+    e2_value = gg_sheet_factory.get_dat_lenh("E2:E2")[0][0].strip()
+    print(f"💰 Vốn mặc định: {e2_value} USDT", flush=True)
+    logger.info(f"Vốn mặc định từ E2: {e2_value}")
+  except:
+    e2_value = "0"
+    print(f"⚠️ Không đọc được vốn E2, mặc định 0", flush=True)
+    logger.warning("Không đọc được vốn mặc định từ E2")
 
   if state_value == STATE_STOP:
     logger.warning("🛑 LỆNH STOP ĐƯỢC KÍCH HOẠT!")
@@ -395,7 +450,7 @@ def do_it():
             if not sym or not str(sym).strip():
                 logger.debug(f"Dòng {row_count}: Symbol rỗng, bỏ qua")
                 continue
-            
+        
             sym = str(sym).strip()
             
             # Bước 1: Kiểm tra symbol đã có VỊ THẾ (đã vào lệnh) chưa
@@ -409,7 +464,7 @@ def do_it():
                 print(f"⚠️  Lỗi khi kiểm tra vị thế cho {sym}: {e}", flush=True)
                 logger.error(f"Lỗi khi kiểm tra vị thế cho {sym}: {e}", exc_info=True)
                 continue
-        
+            
             # Bước 2: Kiểm tra symbol đã có ORDER TRAILING_STOP pending chưa
             print(f"🔍 [{row_count}] Kiểm tra pending orders cho {sym}...", flush=True)
             try:
@@ -426,24 +481,11 @@ def do_it():
             logger.info(f"--- Vào lệnh 1 {state_value}: {sym} TRAILING_STOP đòn bẩy: {d[leverage_idx]}")
 
             # Đọc vốn từ cột H, nếu trống dùng E2
-            try:
-                capitalMoney = float(e2_value) if e2_value != "0" else 100
-            except (ValueError, TypeError):
-                print(f"⚠️ Không thể convert e2_value '{e2_value}' sang float, dùng mặc định 100", flush=True)
-                logger.warning(f"Không thể convert e2_value '{e2_value}' sang float, dùng mặc định 100")
-                capitalMoney = 100
-            
+            capitalMoney = float(e2_value) if e2_value != "0" else 100
             try:
                 if len(d) > capital_idx and d[capital_idx]:
-                    capital_str = str(d[capital_idx]).strip()
-                    # Kiểm tra giá trị có phải là lỗi Excel/Sheets không
-                    if capital_str and not capital_str.startswith("#") and is_number(capital_str):
-                        capitalMoney = float(capital_str)
-                        if capitalMoney <= 0:
-                            logger.warning(f"Giá trị vốn từ cột H <= 0: {capitalMoney}, giữ nguyên e2_value")
-                            capitalMoney = float(e2_value) if e2_value != "0" else 100
-            except (ValueError, TypeError) as e:
-                logger.debug(f"Không thể đọc vốn từ cột H: {e}, dùng e2_value")
+                    capitalMoney = float(d[capital_idx])
+            except (ValueError, TypeError):
                 pass
 
             symbol = d[0]
@@ -510,18 +552,18 @@ def do_it():
                 continue
             
             callback_rate = float(str(d[callback_idx]).replace("%", ""))
-                
-            print(f"📤 Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%", flush=True)
-                logger.info(f"Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%")
             
-                order = order_helper.create_trailing_stop_order(
-                    symbol=symbol,
-                    side=side,
-                    amount=amount,
-                    activation_price=activation_price,
-                    callback_rate=callback_rate,
-                    reduce_only=False
-                )
+            print(f"📤 Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%", flush=True)
+            logger.info(f"Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%")
+            
+            order = order_helper.create_trailing_stop_order(
+                symbol=symbol,
+                side=side,
+                amount=amount,
+                activation_price=activation_price,
+                callback_rate=callback_rate,
+                reduce_only=False
+            )
             
             # Log chi tiết order data để debug
             logger.info(f"[ORDER DATA] {symbol} - Order structure: id={order.get('id', 'N/A')}, symbol={order.get('symbol', 'N/A')}, side={order.get('side', 'N/A')}, status={order.get('status', 'N/A')}")
@@ -537,8 +579,8 @@ def do_it():
                 if 'algoStatus' in order['info']:
                     logger.info(f"[ORDER DATA] {symbol} - algoStatus: {order['info']['algoStatus']}")
             
-                msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
-                
+            msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
+            
             # Log vào order.log
             order_logger.info(f"LỆNH 1 (Entry) | {symbol} | {type} | Activation: {activation_price} | Callback: {callback_rate}% | Leverage: {leverage}x | Capital: {capitalMoney} USDT | Order ID: {order.get('id', 'N/A')}")
             
@@ -593,7 +635,7 @@ def printf(name, data):
         with open(filename, "w", encoding='utf-8') as f:
             f.write(str(data))
             
-        except Exception as e:
+    except Exception as e:
         logger.error(f"Lỗi trong printf() cho {name}: {e}", exc_info=True)
         print(f"⚠️ Lỗi khi lưu order file cho {name}: {e}", flush=True)    
 
