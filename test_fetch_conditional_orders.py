@@ -171,7 +171,269 @@ for symbol in target_symbols:
 
     time.sleep(0.5) # Tránh rate limit
 
+# ============================================================================
+# TEST 2: Dùng Binance Algo Orders API trực tiếp (cho USDS-M Futures)
+# Endpoint: /fapi/v1/algo/...
+# ============================================================================
+print(f"\n\n{'='*80}")
+print("📋 TEST 2: Dùng Binance Algo Orders API (/fapi/v1/algo/...)")
+print(f"{'='*80}\n")
+
+def get_algo_orders_via_fapi(symbol=None, is_open=True, use_all_algo_orders=False):
+    """
+    Lấy algo orders qua Binance API trực tiếp
+    USDS-M Futures endpoints:
+    - Open: /fapi/v1/openAlgoOrders (Current All Algo Open Orders)
+    - All: /fapi/v1/allAlgoOrders (Query All Algo Orders - bao gồm cả history)
+    """
+    try:
+        params = {}
+        if symbol:
+            params['symbol'] = symbol.replace('/', '')
+        
+        if use_all_algo_orders:
+            # Dùng /fapi/v1/allAlgoOrders - Query All Algo Orders
+            # Symbol: YES (mandatory)
+            # Request weight: 5
+            # Có thể có algoId, startTime, endTime
+            if not symbol:
+                print(f"  ⚠️  allAlgoOrders cần symbol (mandatory), bỏ qua")
+                return []
+            response = exchange.fapiPrivateGetAlgoAllOrders(params)
+            print(f"  ✅ Lấy all algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
+        elif is_open:
+            # Lấy open algo orders - /fapi/v1/openAlgoOrders
+            # Symbol: NO (optional)
+            # Request weight: 1 (single) hoặc 40 (all)
+            response = exchange.fapiPrivateGetAlgoOpenOrders(params)
+            print(f"  ✅ Lấy open algo orders thành công (endpoint: /fapi/v1/openAlgoOrders)")
+        else:
+            # Thử dùng historicalOrders nếu có
+            params['limit'] = 50
+            try:
+                response = exchange.fapiPrivateGetAlgoHistoricalOrders(params)
+                print(f"  ✅ Lấy historical algo orders thành công (endpoint: /fapi/v1/algo/historicalOrders)")
+            except:
+                # Fallback: dùng allAlgoOrders thay vì historicalOrders
+                if not symbol:
+                    print(f"  ⚠️  Cần symbol để lấy historical orders, bỏ qua")
+                    return []
+                response = exchange.fapiPrivateGetAlgoAllOrders(params)
+                print(f"  ✅ Lấy algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
+        
+        # Binance trả về: {"code": 200, "msg": "", "data": [...]}
+        if 'data' in response:
+            return response['data']
+        elif isinstance(response, list):
+            return response
+        else:
+            print(f"  ⚠️  Response format không đúng: {list(response.keys()) if isinstance(response, dict) else type(response)}")
+            return []
+    except AttributeError as e:
+        print(f"  ❌ API method không tồn tại: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+    except Exception as e:
+        print(f"  ❌ Lỗi: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+# ============================================================================
+# TEST 3: Dùng Binance UM Conditional Orders API trực tiếp
+# Endpoint: /papi/v1/um/conditional/...
+# ============================================================================
+print(f"\n\n{'='*80}")
+print("📋 TEST 3: Dùng Binance UM Conditional Orders API (/papi/v1/um/conditional/...)")
+print(f"{'='*80}\n")
+
+def get_um_conditional_orders_via_api(symbol=None, is_open=True, is_all=True):
+    """
+    Lấy UM conditional orders qua Binance API trực tiếp
+    Unified Margin endpoints:
+    - Open Orders (all): /papi/v1/um/conditional/openOrders
+    - Open Order (single): /papi/v1/um/conditional/openOrder (cần symbol + strategyId)
+    - All Orders: /papi/v1/um/conditional/allOrders
+    - Order History: /papi/v1/um/conditional/orderHistory (cần symbol)
+    """
+    try:
+        params = {}
+        if symbol:
+            params['symbol'] = symbol.replace('/', '')
+        
+        if is_open:
+            if is_all:
+                # Lấy tất cả open conditional orders
+                # Endpoint: /papi/v1/um/conditional/openOrders
+                response = exchange.papiPrivateGetUmConditionalOpenOrders(params)
+                print(f"  ✅ Lấy all open UM conditional orders thành công")
+            else:
+                # Lấy single open order (cần strategyId)
+                # Endpoint: /papi/v1/um/conditional/openOrder
+                print(f"  ⚠️  openOrder cần strategyId, bỏ qua")
+                return []
+        else:
+            if is_all:
+                # Lấy tất cả conditional orders (có thể có startTime, endTime, limit)
+                # Endpoint: /papi/v1/um/conditional/allOrders
+                params['limit'] = 500  # Default 500, max 1000
+                response = exchange.papiPrivateGetUmConditionalAllOrders(params)
+                print(f"  ✅ Lấy all UM conditional orders thành công")
+            else:
+                # Lấy order history (cần symbol)
+                # Endpoint: /papi/v1/um/conditional/orderHistory
+                if not symbol:
+                    print(f"  ⚠️  orderHistory cần symbol, bỏ qua")
+                    return []
+                response = exchange.papiPrivateGetUmConditionalOrderHistory(params)
+                print(f"  ✅ Lấy UM conditional order history thành công")
+        
+        # Binance trả về có thể là array hoặc dict với 'data' key
+        if isinstance(response, list):
+            return response
+        elif isinstance(response, dict):
+            if 'data' in response:
+                return response['data']
+            elif 'code' in response and response['code'] == 200:
+                # Có thể data nằm trực tiếp trong response
+                return response.get('data', [])
+            else:
+                print(f"  ⚠️  Response format: {list(response.keys())}")
+                return []
+        else:
+            print(f"  ⚠️  Response type không đúng: {type(response)}")
+            return []
+    except AttributeError as e:
+        print(f"  ❌ API method không tồn tại: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+    except Exception as e:
+        print(f"  ❌ Lỗi: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+# Test lấy open algo orders (fapi)
+print("🔍 TEST 2.1: Lấy Open Algo Orders (/fapi/v1/algo/allOpenOrders)")
+open_algo = get_algo_orders_via_fapi(is_open=True)
+if open_algo:
+    print(f"  📊 Tìm thấy {len(open_algo)} open algo orders:")
+    for order in open_algo[:5]:  # Hiển thị 5 đầu tiên
+        print(f"    - Symbol: {order.get('symbol', 'N/A')}, AlgoId: {order.get('algoId', 'N/A')}, Type: {order.get('algoType', 'N/A')}, Status: {order.get('algoStatus', 'N/A')}")
+else:
+    print("  ⚠️  Không có open algo orders")
+
+# Test lấy all algo orders cho từng symbol (fapi) - bao gồm cả history
+print(f"\n🔍 TEST 2.2: Lấy All Algo Orders (/fapi/v1/allAlgoOrders) - bao gồm cả history")
+print("   Lưu ý: Endpoint này trả về active, CANCELED, TRIGGERED hoặc FINISHED")
+print("   Orders > 90 days hoặc CANCELED/EXPIRED no filled > 3 days sẽ không tìm thấy\n")
+for symbol in target_symbols:
+    print(f"\n  📊 {symbol}:")
+    all_algo = get_algo_orders_via_fapi(symbol, is_open=False, use_all_algo_orders=True)
+    if all_algo:
+        cancelled = [o for o in all_algo if o.get('algoStatus', '').upper() in ['CANCELED', 'EXPIRED']]
+        finished = [o for o in all_algo if o.get('algoStatus', '').upper() in ['FINISHED', 'TRIGGERED']]
+        active = [o for o in all_algo if o.get('algoStatus', '').upper() == 'NEW']
+        
+        print(f"    - Tổng số: {len(all_algo)}")
+        print(f"    - Active (NEW): {len(active)}")
+        print(f"    - Cancelled/Expired: {len(cancelled)}")
+        print(f"    - Finished/Triggered: {len(finished)}")
+        
+        if cancelled:
+            print(f"\n    🔴 CANCELLED/EXPIRED ({len(cancelled)} orders):")
+            for order in cancelled[:5]:  # Hiển thị 5 đầu tiên
+                algo_id = order.get('algoId', 'N/A')
+                algo_type = order.get('algoType', 'N/A')
+                activate_price = order.get('activatePrice', 'N/A')
+                callback_rate = order.get('callbackRate', order.get('priceRate', 'N/A'))
+                status = order.get('algoStatus', 'N/A')
+                print(f"      - AlgoId: {algo_id}, Type: {algo_type}, Status: {status}")
+                print(f"        ActivatePrice: {activate_price}, CallbackRate: {callback_rate}")
+                if order.get('time') or order.get('createTime'):
+                    time_val = order.get('time') or order.get('createTime')
+                    print(f"        Time: {datetime.fromtimestamp(time_val/1000)}")
+        
+        if finished:
+            print(f"\n    🟢 FINISHED/TRIGGERED ({len(finished)} orders):")
+            for order in finished[:5]:
+                algo_id = order.get('algoId', 'N/A')
+                algo_type = order.get('algoType', 'N/A')
+                activate_price = order.get('activatePrice', 'N/A')
+                status = order.get('algoStatus', 'N/A')
+                print(f"      - AlgoId: {algo_id}, Type: {algo_type}, Status: {status}, ActivatePrice: {activate_price}")
+                if order.get('time') or order.get('createTime'):
+                    time_val = order.get('time') or order.get('createTime')
+                    print(f"        Time: {datetime.fromtimestamp(time_val/1000)}")
+    else:
+        print(f"    ⚠️  Không có algo orders")
+    
+    time.sleep(0.3)  # Tránh rate limit
+
+# Test lấy open UM conditional orders (papi/um)
+print(f"\n🔍 TEST 3.1: Lấy All Open UM Conditional Orders (/papi/v1/um/conditional/openOrders)")
+um_open = get_um_conditional_orders_via_api(is_open=True, is_all=True)
+if um_open:
+    print(f"  📊 Tìm thấy {len(um_open)} open UM conditional orders:")
+    for order in um_open[:5]:  # Hiển thị 5 đầu tiên
+        strategy_type = order.get('strategyType', order.get('type', 'N/A'))
+        strategy_status = order.get('strategyStatus', order.get('status', 'N/A'))
+        strategy_id = order.get('strategyId', order.get('id', 'N/A'))
+        print(f"    - Symbol: {order.get('symbol', 'N/A')}, StrategyId: {strategy_id}, Type: {strategy_type}, Status: {strategy_status}")
+else:
+    print("  ⚠️  Không có open UM conditional orders")
+
+# Test lấy all UM conditional orders (papi/um)
+print(f"\n🔍 TEST 3.2: Lấy All UM Conditional Orders (/papi/v1/um/conditional/allOrders)")
+um_all = get_um_conditional_orders_via_api(is_open=False, is_all=True)
+if um_all:
+    cancelled_um = [o for o in um_all if o.get('strategyStatus', '').upper() in ['CANCELED', 'EXPIRED']]
+    finished_um = [o for o in um_all if o.get('strategyStatus', '').upper() in ['FINISHED', 'TRIGGERED']]
+    
+    print(f"  📊 Tổng số: {len(um_all)}")
+    print(f"    - Cancelled/Expired: {len(cancelled_um)}")
+    print(f"    - Finished/Triggered: {len(finished_um)}")
+    
+    if cancelled_um:
+        print(f"\n    🔴 CANCELLED/EXPIRED ({len(cancelled_um)} orders):")
+        for order in cancelled_um[:5]:
+            print(f"      - Symbol: {order.get('symbol', 'N/A')}, StrategyId: {order.get('strategyId', 'N/A')}, Type: {order.get('strategyType', 'N/A')}")
+else:
+    print("  ⚠️  Không có UM conditional orders")
+
+# Test lấy UM conditional order history cho từng symbol (papi/um)
+print(f"\n🔍 TEST 3.3: Lấy UM Conditional Order History (/papi/v1/um/conditional/orderHistory)")
+for symbol in target_symbols:
+    print(f"\n  📊 {symbol}:")
+    um_history = get_um_conditional_orders_via_api(symbol, is_open=False, is_all=False)
+    if um_history:
+        cancelled_hist = [o for o in um_history if o.get('strategyStatus', '').upper() in ['CANCELED', 'EXPIRED']]
+        finished_hist = [o for o in um_history if o.get('strategyStatus', '').upper() in ['FINISHED', 'TRIGGERED']]
+        
+        print(f"    - Tổng số: {len(um_history)}")
+        print(f"    - Cancelled/Expired: {len(cancelled_hist)}")
+        print(f"    - Finished/Triggered: {len(finished_hist)}")
+        
+        if cancelled_hist:
+            print(f"\n    🔴 CANCELLED/EXPIRED ({len(cancelled_hist)} orders):")
+            for order in cancelled_hist[:3]:
+                strategy_id = order.get('strategyId', 'N/A')
+                strategy_type = order.get('strategyType', 'N/A')
+                activate_price = order.get('activatePrice', 'N/A')
+                price_rate = order.get('priceRate', 'N/A')
+                print(f"      - StrategyId: {strategy_id}, Type: {strategy_type}, ActivatePrice: {activate_price}, PriceRate: {price_rate}")
+                if order.get('bookTime') or order.get('createTime'):
+                    time_val = order.get('bookTime') or order.get('createTime')
+                    print(f"        Time: {datetime.fromtimestamp(time_val/1000)}")
+    else:
+        print(f"    ⚠️  Không có UM conditional order history")
+    
+    time.sleep(0.3)  # Tránh rate limit
+
 print(f"\n{'='*80}")
 print("✅ KẾT THÚC.")
+print(f"📝 Log file: {log_filename}")
 tee.close()
 input("Nhấn Enter để thoát...")
