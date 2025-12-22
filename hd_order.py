@@ -54,7 +54,7 @@ def is_same_pair(sym1, sym2):
     sym1 = sym1.replace("/", "").upper().strip()
     sym2 = sym2.replace("/", "").upper().strip()
     if sym1 == sym2:
-        return True
+       return True
     return False
 
 
@@ -76,12 +76,12 @@ def cancel_all_open_orders(symbol):
 def has_position(sym):
     """Kiểm tra symbol đã có vị thế (đã vào lệnh) chưa"""
     try:
-        balance = exchange.fetch_balance()
+    balance = exchange.fetch_balance()
         if not balance or 'info' not in balance:
             logger.warning(f"fetch_balance() trả về dữ liệu không hợp lệ cho {sym}")
             return False
         positions = balance['info'].get('positions', [])
-        for position in positions:
+    for position in positions:
             symbol = position.get('symbol', '')
             position_amt = position.get('positionAmt', '0')
             if is_same_pair(symbol, sym) and float(position_amt) != 0:
@@ -148,9 +148,9 @@ def has_pending_trailing_stop_order(symbol):
                                    for d in trailing_stop_details])
             logger.info(f"✅ {symbol} đã có {trailing_stop_count} TRAILING_STOP order(s) - {detail_str}")
             print(f"⏭️  {symbol} đã có {trailing_stop_count} lệnh TRAILING_STOP, bỏ qua", flush=True)
-            return True
-        
-        return False
+        return True
+  
+    return False
     except Exception as e:
         logger.error(f"Lỗi khi kiểm tra order pending cho {symbol}: {e}", exc_info=True)
         # Khi có lỗi, return False để không block việc đặt lệnh (sẽ tự fail nếu duplicate)
@@ -186,7 +186,7 @@ def do_it():
     print(f"📌 Trạng thái: {state_value}", flush=True)
     logger.info(f"Đọc trạng thái từ B2: {state_value}")
   except (IndexError, KeyError):
-    state_value = STATE_CHO
+      state_value = STATE_CHO
     print(f"⚠️ Không đọc được trạng thái B2, mặc định CHỜ", flush=True)
     logger.warning("Không đọc được trạng thái từ B2, mặc định CHỜ")
   
@@ -409,7 +409,7 @@ def do_it():
                 print(f"⚠️  Lỗi khi kiểm tra vị thế cho {sym}: {e}", flush=True)
                 logger.error(f"Lỗi khi kiểm tra vị thế cho {sym}: {e}", exc_info=True)
                 continue
-            
+        
             # Bước 2: Kiểm tra symbol đã có ORDER TRAILING_STOP pending chưa
             print(f"🔍 [{row_count}] Kiểm tra pending orders cho {sym}...", flush=True)
             try:
@@ -510,18 +510,18 @@ def do_it():
                 continue
             
             callback_rate = float(str(d[callback_idx]).replace("%", ""))
-            
+                
             print(f"📤 Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%", flush=True)
-            logger.info(f"Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%")
+                logger.info(f"Tạo Trailing Stop: {symbol} {side} @ {activation_price}, callback={callback_rate}%")
             
-            order = order_helper.create_trailing_stop_order(
-                symbol=symbol,
-                side=side,
-                amount=amount,
-                activation_price=activation_price,
-                callback_rate=callback_rate,
-                reduce_only=False
-            )
+                order = order_helper.create_trailing_stop_order(
+                    symbol=symbol,
+                    side=side,
+                    amount=amount,
+                    activation_price=activation_price,
+                    callback_rate=callback_rate,
+                    reduce_only=False
+                )
             
             # Log chi tiết order data để debug
             logger.info(f"[ORDER DATA] {symbol} - Order structure: id={order.get('id', 'N/A')}, symbol={order.get('symbol', 'N/A')}, side={order.get('side', 'N/A')}, status={order.get('status', 'N/A')}")
@@ -537,8 +537,8 @@ def do_it():
                 if 'algoStatus' in order['info']:
                     logger.info(f"[ORDER DATA] {symbol} - algoStatus: {order['info']['algoStatus']}")
             
-            msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
-            
+                msg = f"✅ <b>LỆNH CHỜ (TRAILING STOP)</b>\n\n<b>Mã:</b> {symbol}\n<b>Side:</b> {type}\n<b>Giá kích hoạt:</b> {activation_price}\n<b>Callback:</b> {callback_rate}%\n<b>Đòn bẩy:</b> {leverage}x\n<b>Vốn:</b> {capitalMoney} USDT"
+                
             # Log vào order.log
             order_logger.info(f"LỆNH 1 (Entry) | {symbol} | {type} | Activation: {activation_price} | Callback: {callback_rate}% | Leverage: {leverage}x | Capital: {capitalMoney} USDT | Order ID: {order.get('id', 'N/A')}")
             
@@ -593,7 +593,7 @@ def printf(name, data):
         with open(filename, "w", encoding='utf-8') as f:
             f.write(str(data))
             
-    except Exception as e:
+        except Exception as e:
         logger.error(f"Lỗi trong printf() cho {name}: {e}", exc_info=True)
         print(f"⚠️ Lỗi khi lưu order file cho {name}: {e}", flush=True)    
 
