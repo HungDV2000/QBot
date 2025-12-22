@@ -175,6 +175,8 @@ for symbol in test_symbols:
             print(f"  ⚠️  Không có open orders cho {symbol}")
     except Exception as e:
         print(f"  ❌ Lỗi khi lấy orders cho {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ============================================================================
 # TEST 3: Thử lấy ORDER HISTORY (cancelled/filled orders)
@@ -220,7 +222,32 @@ try:
     
 except Exception as e:
     print(f"❌ Lỗi khi lấy order history: {e}")
-    print("💡 Lưu ý: fetch_orders() có thể không hỗ trợ algo orders, chỉ hỗ trợ basic orders")
+    print("💡 Lưu ý: fetch_orders() cần symbol argument, sẽ test với từng symbol...")
+    import traceback
+    traceback.print_exc()
+    
+    # Thử với từng symbol cụ thể
+    print(f"\n[STEP 3.2] Thử lấy order history cho từng symbol:")
+    for symbol in test_symbols:
+        try:
+            symbol_history = exchange.fetch_orders(symbol, limit=20)
+            if symbol_history:
+                conditional_in_history = [o for o in symbol_history if is_trailing_stop_order(o)]
+                cancelled_cond = [o for o in conditional_in_history if 'cancel' in o.get('status', '').lower() or o.get('status', '').lower() == 'canceled']
+                filled_cond = [o for o in conditional_in_history if o.get('status', '').lower() in ['closed', 'filled']]
+                
+                if cancelled_cond or filled_cond:
+                    print(f"\n  📊 {symbol}:")
+                    print(f"    - Conditional orders: {len(conditional_in_history)}")
+                    print(f"    - Cancelled: {len(cancelled_cond)}")
+                    print(f"    - Filled: {len(filled_cond)}")
+                    
+                    if cancelled_cond:
+                        for order in cancelled_cond[:5]:  # Hiển thị 5 đầu tiên
+                            order_info = format_order_info(order)
+                            print(f"      🔴 Cancelled: Order ID {order_info['id']}, Algo ID {order_info['algoId']}")
+        except Exception as e2:
+            print(f"  ⚠️  {symbol}: {e2}")
 
 # ============================================================================
 # TEST 4: Thử dùng fetch_closed_orders()
@@ -230,19 +257,28 @@ print("📋 TEST 4: Thử dùng fetch_closed_orders()\n")
 print("-" * 100)
 
 try:
-    print("[STEP 4.1] Gọi fetch_closed_orders()...")
-    closed_orders = exchange.fetch_closed_orders(limit=50)
-    print(f"✅ Thành công! Tổng số closed orders: {len(closed_orders) if closed_orders else 0}")
+    print("[STEP 4.1] Gọi fetch_closed_orders() cần symbol argument, sẽ test với từng symbol...")
     
-    if closed_orders:
-        conditional_closed = [o for o in closed_orders if is_trailing_stop_order(o)]
-        print(f"  - Conditional orders trong closed orders: {len(conditional_closed)}")
-        
-        if conditional_closed:
-            print(f"\n🟡 CONDITIONAL ORDERS trong closed orders ({len(conditional_closed)} orders):")
-            for idx, order in enumerate(conditional_closed[:10], 1):
-                order_info = format_order_info(order)
-                print(f"  [{idx}] {order_info['symbol']} - Order ID: {order_info['id']}, Status: {order_info['status']}, Algo ID: {order_info['algoId']}")
+    total_closed_conditional = []
+    for symbol in test_symbols:
+        try:
+            symbol_closed = exchange.fetch_closed_orders(symbol, limit=20)
+            if symbol_closed:
+                conditional_closed = [o for o in symbol_closed if is_trailing_stop_order(o)]
+                total_closed_conditional.extend(conditional_closed)
+                
+                if conditional_closed:
+                    print(f"\n  📊 {symbol}: {len(conditional_closed)} conditional orders")
+                    for order in conditional_closed[:3]:  # Hiển thị 3 đầu tiên
+                        order_info = format_order_info(order)
+                        print(f"    - Order ID: {order_info['id']}, Status: {order_info['status']}, Algo ID: {order_info['algoId']}")
+        except Exception as e2:
+            print(f"  ⚠️  {symbol}: {e2}")
+    
+    if total_closed_conditional:
+        print(f"\n✅ Tổng số conditional orders trong closed orders: {len(total_closed_conditional)}")
+    else:
+        print(f"\n⚠️  Không tìm thấy conditional orders trong closed orders")
     
 except Exception as e:
     print(f"❌ Lỗi: {e}")
