@@ -89,6 +89,7 @@ def check_all_orders():
                 algo_id = info.get('algoId', None)
                 symbol = order.get('symbol', 'N/A')
                 order_type = order.get('type', 'N/A')
+                order_status = order.get('status', 'N/A')  # 'open', 'closed', 'canceled'
                 activate_price = info.get('activatePrice', None)
                 callback_rate = info.get('callbackRate', None)
                 price_rate = info.get('priceRate', None)
@@ -96,7 +97,7 @@ def check_all_orders():
                 
                 # Chỉ log chi tiết cho 5 orders đầu tiên để debug
                 if idx <= 5:
-                    print(f"   [ORDER {idx}/{len(all_open_orders)}] {symbol} - Type: {order_type}, algoId: {algo_id}, activatePrice: {activate_price}")
+                    print(f"   [ORDER {idx}/{len(all_open_orders)}] {symbol} - Type: {order_type}, Status: {order_status}, algoId: {algo_id}, activatePrice: {activate_price}")
                 
                 # Logic phân loại: Conditional order nếu có BẤT KỲ dấu hiệu nào sau:
                 # 1. Có algoId
@@ -126,7 +127,8 @@ def check_all_orders():
                         'side': side,
                         'activation': activate_price if activate_price is not None else 'N/A',
                         'callback': callback_value if callback_value is not None else 'N/A',
-                        'order_id': order.get('id', 'N/A')
+                        'order_id': order.get('id', 'N/A'),
+                        'status': order_status  # Thêm status để phân biệt pending/filled
                     })
                     if idx <= 5:
                         print(f"      → AlgoId: {algo_id}, Type: {order_type}, Activation: {activate_price}, Callback: {callback_value}")
@@ -143,7 +145,8 @@ def check_all_orders():
                         'id': order_id,
                         'type': order_type,
                         'side': side,
-                        'price': price
+                        'price': price,
+                        'status': order_status  # Thêm status để phân biệt pending/filled
                     })
                 
                 all_symbols.add(symbol)
@@ -209,12 +212,15 @@ def check_all_orders():
     else:
         print("ℹ️  KHÔNG CÓ CONDITIONAL ORDERS\n")
     
-    # Kiểm tra duplicate symbols
+    # Kiểm tra duplicate symbols - TẤT CẢ ORDERS (bất kể đã vào lệnh hay chưa)
+    # Logic: Trùng lặp = cùng 1 mã có nhiều orders cùng loại trong 1 đợt đặt lệnh
     print(f"{'='*100}")
-    print(f"🔍 KIỂM TRA LẶP ĐƠN:")
+    print(f"🔍 KIỂM TRA LẶP ĐƠN (TẤT CẢ ORDERS - BẤT KỂ ĐÃ VÀO LỆNH HAY CHƯA):")
     print(f"{'='*100}\n")
+    print(f"💡 Logic: Trùng lặp = cùng 1 mã có nhiều orders cùng loại")
+    print(f"💡 Không phân biệt pending hay filled - chỉ cần cùng symbol là tính\n")
     
-    # Nhóm theo symbol
+    # Nhóm TẤT CẢ orders theo symbol
     symbol_orders = {}
     for order in basic_orders:
         sym = order['symbol']
@@ -228,7 +234,7 @@ def check_all_orders():
             symbol_orders[sym] = {'basic': [], 'conditional': []}
         symbol_orders[sym]['conditional'].append(order)
     
-    # Tìm symbols có nhiều orders
+    # Tìm symbols có nhiều orders (bất kể status)
     duplicates_found = False
     for symbol, orders in symbol_orders.items():
         total = len(orders['basic']) + len(orders['conditional'])
@@ -239,7 +245,8 @@ def check_all_orders():
             if orders['basic']:
                 print(f"   - Basic orders ({len(orders['basic'])}):")
                 for order in orders['basic']:
-                    print(f"      • Order ID: {order['id']}, Type: {order['type']}, Price: {order['price']}")
+                    status = order.get('status', 'N/A')
+                    print(f"      • Order ID: {order['id']}, Type: {order['type']}, Status: {status}, Price: {order['price']}")
             
             if orders['conditional']:
                 print(f"   - Conditional orders ({len(orders['conditional'])}):")
@@ -249,19 +256,23 @@ def check_all_orders():
                     order_type = order.get('order_type', 'N/A')
                     activation = order.get('activation', 'N/A')
                     callback = order.get('callback', 'N/A')
-                    print(f"      • Order Type: {order_type}, Algo ID: {algo_id}, AlgoType: {algo_type}, Activation: {activation}, Callback: {callback}")
+                    status = order.get('status', 'N/A')
+                    print(f"      • Order Type: {order_type}, Status: {status}, Algo ID: {algo_id}, Activation: {activation}, Callback: {callback}")
             print()
     
     if not duplicates_found:
-        print("✅ KHÔNG CÓ SYMBOLS BỊ LẶP ĐƠN!\n")
+        print("✅ KHÔNG CÓ SYMBOLS NÀO BỊ LẶP ĐƠN!\n")
     
-    # Kiểm tra cụ thể TRAILING_STOP lặp đơn
+    # Kiểm tra cụ thể TRAILING_STOP lặp đơn - TẤT CẢ ORDERS
+    # Đây là Lệnh 1 (Entry) - có thể bị trùng lặp nếu bot đặt nhiều lần
     print(f"{'='*100}")
-    print(f"🎯 KIỂM TRA TRAILING_STOP LẶP ĐƠN:")
+    print(f"🎯 KIỂM TRA TRAILING_STOP LẶP ĐƠN (LỆNH 1 - ENTRY):")
     print(f"{'='*100}\n")
+    print(f"💡 Đây là Entry orders (Lệnh 1) - nếu có nhiều hơn 1 = TRÙNG LẶP")
+    print(f"💡 Bất kể pending hay filled - chỉ cần cùng symbol và cùng loại = trùng\n")
     
     trailing_symbols = {}
-    for order in conditional_orders:
+    for order in conditional_orders:  # Kiểm tra TẤT CẢ conditional orders
         # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
         order_type = order.get('order_type', '')
         algo_type = order.get('algoType', '')
@@ -281,7 +292,8 @@ def check_all_orders():
                 activation = order.get('activation', 'N/A')
                 callback = order.get('callback', 'N/A')
                 order_type = order.get('order_type', 'N/A')
-                print(f"   [{i}] Order Type: {order_type}, Algo ID: {algo_id}, Activation: {activation}, Callback: {callback}")
+                status = order.get('status', 'N/A')
+                print(f"   [{i}] Order Type: {order_type}, Status: {status}, Algo ID: {algo_id}, Activation: {activation}, Callback: {callback}")
             print()
     
     if not trailing_duplicates:
@@ -294,10 +306,13 @@ if __name__ == "__main__":
         print(f"\n{'='*100}")
         print(f"💡 HƯỚNG DẪN:")
         print(f"{'='*100}")
-        print(f"1. Nếu thấy '⚠️ Có X orders!' → Symbol đó có nhiều orders")
-        print(f"2. Nếu thấy '❌ Có X TRAILING_STOP orders trùng lặp!' → Cần hủy thủ công trên Binance")
-        print(f"3. Nếu thấy '✅ KHÔNG CÓ LẶP ĐƠN' → Logic mới đã hoạt động tốt!")
-        print(f"4. Chạy lại script này định kỳ để kiểm tra")
+        print(f"1. Script kiểm tra LẶP ĐƠN cho TẤT CẢ orders (bất kể pending hay filled)")
+        print(f"2. Logic trùng lặp: Cùng 1 mã có nhiều orders cùng loại = TRÙNG")
+        print(f"3. Không phân biệt đã vào lệnh hay chưa - chỉ cần cùng symbol là tính")
+        print(f"4. Nếu thấy '⚠️ Có X orders!' → Symbol đó có nhiều orders (CẦN XỬ LÝ)")
+        print(f"5. Nếu thấy '❌ Có X TRAILING_STOP orders trùng lặp!' → Cần hủy thủ công trên Binance")
+        print(f"6. Nếu thấy '✅ KHÔNG CÓ LẶP ĐƠN' → Logic mới đã hoạt động tốt!")
+        print(f"7. Chạy lại script này định kỳ để kiểm tra")
         print(f"\n💡 NOTE:")
         print(f"   - Conditional/Algo orders được nhận diện bằng: algoId, order_type chứa 'trailing', activatePrice, hoặc algoType")
         print(f"   - TRAILING_STOP orders có order_type = 'trailing_stop_market' hoặc algoType = 'VP'")
