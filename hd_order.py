@@ -41,7 +41,8 @@ exchange = exchange_class({
     'apiKey': cst.key_binance,
     'secret': cst.secret_binance,
     'options': {
-        'defaultType': 'future' 
+        'defaultType': 'future',
+        'warnOnFetchOpenOrdersWithoutSymbol': False  # Tắt warning để tránh exception
     }
 })
 exchange.setSandboxMode(False)
@@ -96,24 +97,12 @@ def has_pending_trailing_stop_order(symbol):
     Logic: Trùng lặp = cùng 1 mã có nhiều orders cùng loại trong 1 đợt đặt lệnh
     """
     try:
-        # Lấy tất cả open orders (bao gồm cả algo orders)
-        # Không chỉ định symbol để lấy tất cả, sau đó filter
-        all_open_orders = exchange.fetch_open_orders()
+        # Sử dụng fetch_open_orders(symbol) để tránh rate limit và lấy orders cụ thể cho symbol
+        symbol_orders = exchange.fetch_open_orders(symbol)
         
-        if all_open_orders is None:
-            logger.warning(f"fetch_open_orders() trả về None cho {symbol}")
+        if symbol_orders is None:
+            logger.warning(f"fetch_open_orders({symbol}) trả về None")
             return False
-        
-        if not all_open_orders:
-            return False
-        
-        # Filter orders theo symbol
-        symbol_orders = []
-        for order in all_open_orders:
-            order_symbol = order.get('symbol', '')
-            # So sánh symbol (có thể có :USDT hoặc không)
-            if is_same_pair(order_symbol, symbol):
-                symbol_orders.append(order)
         
         if not symbol_orders:
             return False
@@ -136,7 +125,6 @@ def has_pending_trailing_stop_order(symbol):
             
             # Kiểm tra TRAILING_STOP (theo logic test_check_conditional_orders.py):
             # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
-            # Không cần kiểm tra is_conditional trước vì chỉ cần detect TRAILING_STOP
             is_trailing_stop = (
                 'trailing' in str(order_type).lower() or
                 algo_type == 'VP'
@@ -165,6 +153,7 @@ def has_pending_trailing_stop_order(symbol):
         return False
     except Exception as e:
         logger.error(f"Lỗi khi kiểm tra order pending cho {symbol}: {e}", exc_info=True)
+        # Khi có lỗi, return False để không block việc đặt lệnh (sẽ tự fail nếu duplicate)
         return False
 
 def execute_command(commands):
