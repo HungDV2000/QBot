@@ -21,15 +21,24 @@ import urllib.parse
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
+# Tạo tên file log với timestamp: hd_order_dd_mm_yyyy_h_m_s.log
+log_timestamp = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
+log_filename = f'hd_order_{log_timestamp}.log'
+
 # Cải thiện logging với timestamp và UTF-8 encoding
 logging.basicConfig(
-    filename='hd_order.log', 
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     encoding='utf-8'
 )
 logger = logging.getLogger(__name__)
+
+# Tạo file handler với tên file động
+file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+file_handler.setLevel(logging.INFO)
+logger.addHandler(file_handler)
 
 # Tạo order logger riêng để track tất cả orders
 order_logger = logging.getLogger('order')
