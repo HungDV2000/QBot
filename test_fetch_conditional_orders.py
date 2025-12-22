@@ -73,8 +73,28 @@ for symbol in target_symbols:
         orders = exchange.fetch_orders(symbol, limit=50)
         found_count = 0
         
-        for order in orders:
+        for idx, order in enumerate(orders, 1):
+            # In cấu trúc order để debug
+            print(f"\n  📦 Order #{idx} - Cấu trúc:")
+            print(f"      order keys: {list(order.keys())}")
+            if 'info' in order:
+                print(f"      order['info'] keys: {list(order.get('info', {}).keys())}")
+            
+            # In một số giá trị cơ bản từ order
+            print(f"      order['id']: {order.get('id', 'N/A')}")
+            print(f"      order['symbol']: {order.get('symbol', 'N/A')}")
+            print(f"      order['type']: {order.get('type', 'N/A')}")
+            print(f"      order['status']: {order.get('status', 'N/A')}")
+            if 'info' in order:
+                info = order.get('info', {})
+                print(f"      order['info']['type']: {info.get('type', 'N/A')}")
+                print(f"      order['info']['origType']: {info.get('origType', 'N/A')}")
+                print(f"      order['info']['status']: {info.get('status', 'N/A')}")
+            
+            # Kiểm tra có phải conditional order không
             is_cond, type_name = is_conditional_order(order)
+            print(f"      → Is Conditional: {is_cond}, Type: {type_name}")
+            
             if is_cond:
                 found_count += 1
                 info = order.get('info', {})
