@@ -250,83 +250,46 @@ def get_algo_orders_via_fapi(symbol=None, is_open=True, use_all_algo_orders=Fals
     USDS-M Futures endpoints:
     - Open: /fapi/v1/openAlgoOrders (Current All Algo Open Orders)
     - All: /fapi/v1/allAlgoOrders (Query All Algo Orders - bao gồm cả history)
-    
-    Theo tài liệu Binance: Dùng fetch_all_algo_orders() hoặc fapiPrivate_get_algoOrders
     """
     try:
         params = {}
         if symbol:
             params['symbol'] = symbol.replace('/', '')
         
-        response = None
-        
-        # Thử dùng CCXT methods trước (theo tài liệu)
-        try:
-            if use_all_algo_orders:
-                # Dùng /fapi/v1/allAlgoOrders - Query All Algo Orders
-                # Symbol: YES (mandatory)
-                if not symbol:
-                    print(f"  ⚠️  allAlgoOrders cần symbol (mandatory), bỏ qua")
-                    return []
-                
-                # Thử CCXT method trước
-                if hasattr(exchange, 'fetch_all_algo_orders'):
-                    print(f"  🔄 Thử dùng CCXT fetch_all_algo_orders()...")
-                    response = exchange.fetch_all_algo_orders(symbol, params=params)
-                    print(f"  ✅ Lấy all algo orders thành công (dùng CCXT fetch_all_algo_orders)")
-                elif hasattr(exchange, 'fapiPrivateGetAllAlgoOrders'):
-                    print(f"  🔄 Thử dùng CCXT fapiPrivateGetAllAlgoOrders()...")
-                    response = exchange.fapiPrivateGetAllAlgoOrders(params)
-                    print(f"  ✅ Lấy all algo orders thành công (dùng CCXT method)")
-                else:
-                    raise AttributeError("CCXT không có method hỗ trợ")
-                    
-            elif is_open:
-                # Lấy open algo orders - /fapi/v1/openAlgoOrders
-                # Symbol: NO (optional)
-                if hasattr(exchange, 'fetch_open_algo_orders'):
-                    print(f"  🔄 Thử dùng CCXT fetch_open_algo_orders()...")
-                    response = exchange.fetch_open_algo_orders(symbol, params=params)
-                    print(f"  ✅ Lấy open algo orders thành công (dùng CCXT fetch_open_algo_orders)")
-                elif hasattr(exchange, 'fapiPrivateGetOpenAlgoOrders'):
-                    print(f"  🔄 Thử dùng CCXT fapiPrivateGetOpenAlgoOrders()...")
-                    response = exchange.fapiPrivateGetOpenAlgoOrders(params)
-                    print(f"  ✅ Lấy open algo orders thành công (dùng CCXT method)")
-                else:
-                    raise AttributeError("CCXT không có method hỗ trợ")
-            else:
-                # Historical orders
-                if not symbol:
-                    print(f"  ⚠️  Cần symbol để lấy historical orders, bỏ qua")
-                    return []
-                
-                if hasattr(exchange, 'fetch_all_algo_orders'):
-                    print(f"  🔄 Thử dùng CCXT fetch_all_algo_orders()...")
-                    response = exchange.fetch_all_algo_orders(symbol, params=params)
-                    print(f"  ✅ Lấy algo orders thành công (dùng CCXT fetch_all_algo_orders)")
-                else:
-                    raise AttributeError("CCXT không có method hỗ trợ")
-                    
-        except (AttributeError, Exception) as e:
-            # Fallback: dùng API trực tiếp
-            print(f"  ⚠️  CCXT methods không khả dụng ({e}), dùng API trực tiếp...")
+        if use_all_algo_orders:
+            # Dùng /fapi/v1/allAlgoOrders - Query All Algo Orders
+            # Symbol: YES (mandatory)
+            # Request weight: 5
+            if not symbol:
+                print(f"  ⚠️  allAlgoOrders cần symbol (mandatory), bỏ qua")
+                return []
             
-            if use_all_algo_orders:
-                if not symbol:
-                    return []
-                response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
-                if response:
-                    print(f"  ✅ Lấy all algo orders thành công (API trực tiếp: /fapi/v1/allAlgoOrders)")
-            elif is_open:
-                response = call_binance_api_direct('GET', '/fapi/v1/openAlgoOrders', params)
-                if response:
-                    print(f"  ✅ Lấy open algo orders thành công (API trực tiếp: /fapi/v1/openAlgoOrders)")
+            # Dùng API trực tiếp vì CCXT có thể không hỗ trợ
+            response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
+            if response:
+                print(f"  ✅ Lấy all algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
             else:
-                if not symbol:
-                    return []
-                response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
-                if response:
-                    print(f"  ✅ Lấy algo orders thành công (API trực tiếp: /fapi/v1/allAlgoOrders)")
+                return []
+                    
+        elif is_open:
+            # Lấy open algo orders - /fapi/v1/openAlgoOrders
+            # Symbol: NO (optional)
+            # Request weight: 1 (single) hoặc 40 (all)
+            response = call_binance_api_direct('GET', '/fapi/v1/openAlgoOrders', params)
+            if response:
+                print(f"  ✅ Lấy open algo orders thành công (endpoint: /fapi/v1/openAlgoOrders)")
+            else:
+                return []
+        else:
+            # Thử dùng allAlgoOrders thay vì historicalOrders
+            if not symbol:
+                print(f"  ⚠️  Cần symbol để lấy historical orders, bỏ qua")
+                return []
+            response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
+            if response:
+                print(f"  ✅ Lấy algo orders thành công (endpoint: /fapi/v1/allAlgoOrders)")
+            else:
+                return []
         
         if not response:
             return []
