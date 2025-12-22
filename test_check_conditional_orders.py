@@ -5,6 +5,37 @@ Giúp verify logic tránh lặp đơn với Conditional orders
 import cst
 import ccxt
 from datetime import datetime
+import sys
+import os
+
+# Class để ghi log vào cả console và file
+class TeeOutput:
+    def __init__(self, file_path):
+        self.terminal = sys.stdout
+        self.log_file = open(file_path, 'a', encoding='utf-8')
+    
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+        self.log_file.flush()  # Đảm bảo ghi ngay vào file
+    
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+    
+    def close(self):
+        if self.log_file:
+            self.log_file.close()
+
+# Thiết lập log file
+log_file_path = 'test.txt'
+tee = TeeOutput(log_file_path)
+sys.stdout = tee
+
+# Ghi header vào file log
+print(f"\n{'='*100}")
+print(f"🔍 KIỂM TRA ORDERS - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"{'='*100}\n")
 
 exchange_id = 'binance'
 exchange_class = getattr(ccxt, exchange_id)
@@ -189,17 +220,27 @@ def check_all_orders():
         print("✅ KHÔNG CÓ TRAILING_STOP NÀO BỊ LẶP ĐƠN!\n")
 
 if __name__ == "__main__":
-    check_all_orders()
-    
-    print(f"\n{'='*100}")
-    print(f"💡 HƯỚNG DẪN:")
-    print(f"{'='*100}")
-    print(f"1. Nếu thấy '⚠️ Có X orders!' → Symbol đó có nhiều orders")
-    print(f"2. Nếu thấy '❌ Có X TRAILING_STOP orders trùng lặp!' → Cần hủy thủ công trên Binance")
-    print(f"3. Nếu thấy '✅ KHÔNG CÓ LẶP ĐƠN' → Logic mới đã hoạt động tốt!")
-    print(f"4. Chạy lại script này định kỳ để kiểm tra")
-    print(f"\n💡 NOTE:")
-    print(f"   - TRAILING_STOP orders có algoType = 'VP' (Volume Participation)")
-    print(f"   - Chúng nằm trong tab 'Conditional' trên Binance UI")
-    print(f"   - fetch_open_orders() với defaultType='future' TRẢ VỀ CẢ algo orders!")
-    print(f"   - Phân biệt bằng cách check order['info']['algoId'] != None\n")
+    try:
+        check_all_orders()
+        
+        print(f"\n{'='*100}")
+        print(f"💡 HƯỚNG DẪN:")
+        print(f"{'='*100}")
+        print(f"1. Nếu thấy '⚠️ Có X orders!' → Symbol đó có nhiều orders")
+        print(f"2. Nếu thấy '❌ Có X TRAILING_STOP orders trùng lặp!' → Cần hủy thủ công trên Binance")
+        print(f"3. Nếu thấy '✅ KHÔNG CÓ LẶP ĐƠN' → Logic mới đã hoạt động tốt!")
+        print(f"4. Chạy lại script này định kỳ để kiểm tra")
+        print(f"\n💡 NOTE:")
+        print(f"   - TRAILING_STOP orders có algoType = 'VP' (Volume Participation)")
+        print(f"   - Chúng nằm trong tab 'Conditional' trên Binance UI")
+        print(f"   - fetch_open_orders() với defaultType='future' TRẢ VỀ CẢ algo orders!")
+        print(f"   - Phân biệt bằng cách check order['info']['algoId'] != None")
+        print(f"\n📝 Kết quả đã được ghi vào file: {log_file_path}\n")
+    except Exception as e:
+        print(f"❌ LỖI KHI CHẠY SCRIPT: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Đóng file log và restore stdout
+        sys.stdout = tee.terminal
+        tee.close()
