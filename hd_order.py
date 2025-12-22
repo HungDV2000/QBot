@@ -88,7 +88,10 @@ def has_position(sym):
         return False
 
 def has_pending_trailing_stop_order(symbol):
-    """Kiểm tra symbol đã có order TRAILING_STOP pending chưa"""
+    """
+    Kiểm tra symbol đã có order TRAILING_STOP chưa (bất kể pending hay filled)
+    Logic: Trùng lặp = cùng 1 mã có nhiều orders cùng loại trong 1 đợt đặt lệnh
+    """
     try:
         # Lấy tất cả open orders (bao gồm cả algo orders)
         # Không chỉ định symbol để lấy tất cả, sau đó filter
@@ -108,39 +111,61 @@ def has_pending_trailing_stop_order(symbol):
         if not symbol_orders:
             return False
         
+        # Đếm số lượng TRAILING_STOP orders cho symbol này
+        trailing_stop_count = 0
+        trailing_stop_details = []
+        
         for order in symbol_orders:
             # Lấy thông tin từ order
             info = order.get('info', {})
             order_id = order.get('id', 'N/A')
             algo_id = info.get('algoId', None)
-            
-            # Check nhiều trường để detect TRAILING_STOP
             order_type = order.get('type', '')
-            order_type_info = info.get('orderType', '')
-            algo_type = info.get('algoType', '')
-            order_type_raw = info.get('type', '')
+            algo_type = info.get('algoType', None)
             activate_price = info.get('activatePrice', None)
             callback_rate = info.get('callbackRate', None)
+            price_rate = info.get('priceRate', None)
             
-            # Kiểm tra tất cả các trường có chứa "TRAILING"
-            is_trailing = (
-                'TRAILING' in str(order_type).upper() or
-                'TRAILING' in str(order_type_info).upper() or
-                'TRAILING' in str(algo_type).upper() or
-                'TRAILING' in str(order_type_raw).upper()
+            # Logic phân loại Conditional order (theo test_check_conditional_orders.py):
+            # Conditional order nếu có BẤT KỲ dấu hiệu nào sau:
+            # 1. Có algoId
+            # 2. Type chứa 'trailing' 
+            # 3. Có activatePrice (dấu hiệu của algo/conditional order)
+            # 4. Có algoType
+            is_conditional = (
+                algo_id is not None or
+                'trailing' in str(order_type).lower() or
+                activate_price is not None or
+                algo_type is not None
             )
             
-            # Nếu có algoId (bất kỳ algo order nào) HOẶC có activatePrice (dấu hiệu của algo order)
-            # VP = Volume Participation (Binance's TRAILING_STOP)
-            is_algo_trailing = (
-                (algo_id is not None) or  # Có algoId = algo order
-                (activate_price is not None and callback_rate is not None)  # Có activatePrice + callbackRate = TRAILING_STOP
-            )
-            
-            if is_trailing or is_algo_trailing:
-                logger.info(f"✅ {symbol} đã có order TRAILING_STOP - Order ID: {order_id}, Algo ID: {algo_id}, Activation: {activate_price}, Callback: {callback_rate}")
-                print(f"⏭️  {symbol} đã có lệnh chờ TRAILING_STOP, bỏ qua", flush=True)
-                return True
+            if is_conditional:
+                # Kiểm tra xem có phải TRAILING_STOP không
+                # TRAILING_STOP nếu có 'trailing' trong order_type hoặc algoType = 'VP'
+                is_trailing_stop = (
+                    'trailing' in str(order_type).lower() or
+                    algo_type == 'VP'
+                )
+                
+                if is_trailing_stop:
+                    trailing_stop_count += 1
+                    trailing_stop_details.append({
+                        'order_id': order_id,
+                        'algo_id': algo_id,
+                        'order_type': order_type,
+                        'algo_type': algo_type,
+                        'activation': activate_price,
+                        'callback': callback_rate if callback_rate is not None else price_rate,
+                        'status': order.get('status', 'N/A')
+                    })
+        
+        # Nếu có ít nhất 1 TRAILING_STOP order = đã có order (tránh trùng lặp)
+        if trailing_stop_count > 0:
+            detail_str = ", ".join([f"Order ID: {d['order_id']}, Type: {d['order_type']}, Status: {d['status']}" 
+                                   for d in trailing_stop_details])
+            logger.info(f"✅ {symbol} đã có {trailing_stop_count} TRAILING_STOP order(s) - {detail_str}")
+            print(f"⏭️  {symbol} đã có {trailing_stop_count} lệnh TRAILING_STOP, bỏ qua", flush=True)
+            return True
         
         return False
     except Exception as e:
