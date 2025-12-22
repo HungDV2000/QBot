@@ -202,14 +202,34 @@ def do_it():
     logger.warning("Không đọc được trạng thái từ B2, mặc định CHỜ")
   
   # Đọc vốn mặc định từ E2
+  e2_value = "0"
   try:
-    e2_value = gg_sheet_factory.get_dat_lenh("E2:E2")[0][0].strip()
-    print(f"💰 Vốn mặc định: {e2_value} USDT", flush=True)
-    logger.info(f"Vốn mặc định từ E2: {e2_value}")
-  except:
-    e2_value = "0"
-    print(f"⚠️ Không đọc được vốn E2, mặc định 0", flush=True)
-    logger.warning("Không đọc được vốn mặc định từ E2")
+    raw_value = gg_sheet_factory.get_dat_lenh("E2:E2")[0][0].strip()
+    # Kiểm tra giá trị có phải là lỗi Excel/Sheets không (#DIV/0!, #N/A, #ERROR!, etc.)
+    if raw_value.startswith("#") or not is_number(raw_value):
+      print(f"⚠️ Giá trị E2 không hợp lệ: '{raw_value}', dùng mặc định 100", flush=True)
+      logger.warning(f"Giá trị E2 không hợp lệ: '{raw_value}', dùng mặc định 100")
+      e2_value = "100"
+    else:
+      # Thử convert để đảm bảo là số hợp lệ
+      try:
+        test_float = float(raw_value)
+        if test_float <= 0:
+          print(f"⚠️ Giá trị E2 <= 0: '{raw_value}', dùng mặc định 100", flush=True)
+          logger.warning(f"Giá trị E2 <= 0: '{raw_value}', dùng mặc định 100")
+          e2_value = "100"
+        else:
+          e2_value = raw_value
+          print(f"💰 Vốn mặc định: {e2_value} USDT", flush=True)
+          logger.info(f"Vốn mặc định từ E2: {e2_value}")
+      except (ValueError, TypeError):
+        print(f"⚠️ Không thể convert E2 '{raw_value}' sang số, dùng mặc định 100", flush=True)
+        logger.warning(f"Không thể convert E2 '{raw_value}' sang số, dùng mặc định 100")
+        e2_value = "100"
+  except Exception as e:
+    print(f"⚠️ Không đọc được vốn E2: {e}, mặc định 100", flush=True)
+    logger.warning(f"Không đọc được vốn mặc định từ E2: {e}")
+    e2_value = "100"
 
   if state_value == STATE_STOP:
     logger.warning("🛑 LỆNH STOP ĐƯỢC KÍCH HOẠT!")
@@ -417,11 +437,24 @@ def do_it():
             logger.info(f"--- Vào lệnh 1 {state_value}: {sym} TRAILING_STOP đòn bẩy: {d[leverage_idx]}")
 
             # Đọc vốn từ cột H, nếu trống dùng E2
-            capitalMoney = float(e2_value) if e2_value != "0" else 100
+            try:
+                capitalMoney = float(e2_value) if e2_value != "0" else 100
+            except (ValueError, TypeError):
+                print(f"⚠️ Không thể convert e2_value '{e2_value}' sang float, dùng mặc định 100", flush=True)
+                logger.warning(f"Không thể convert e2_value '{e2_value}' sang float, dùng mặc định 100")
+                capitalMoney = 100
+            
             try:
                 if len(d) > capital_idx and d[capital_idx]:
-                    capitalMoney = float(d[capital_idx])
-            except (ValueError, TypeError):
+                    capital_str = str(d[capital_idx]).strip()
+                    # Kiểm tra giá trị có phải là lỗi Excel/Sheets không
+                    if capital_str and not capital_str.startswith("#") and is_number(capital_str):
+                        capitalMoney = float(capital_str)
+                        if capitalMoney <= 0:
+                            logger.warning(f"Giá trị vốn từ cột H <= 0: {capitalMoney}, giữ nguyên e2_value")
+                            capitalMoney = float(e2_value) if e2_value != "0" else 100
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Không thể đọc vốn từ cột H: {e}, dùng e2_value")
                 pass
 
             symbol = d[0]
