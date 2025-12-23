@@ -145,15 +145,41 @@ def get_algo_orders_for_symbol(symbol):
 
 def cancel_all_algo_orders_direct(symbol):
     """
-    [FIX QUAN TRỌNG] Hủy toàn bộ ALGO ORDERS (Trailing Stop) 
-    bằng cách gọi API trực tiếp, vì ccxt.cancel_all_orders thường bỏ sót loại này.
+    [FIXED] Hủy từng Algo Order một vì Binance không hỗ trợ hủy hàng loạt qua endpoint cũ.
     """
     try:
-        params = {'symbol': symbol.replace('/', '')}
-        # Endpoint DELETE /fapi/v1/allAlgoOrders hủy tất cả algo orders của symbol
-        response = call_binance_api_direct('DELETE', '/fapi/v1/allAlgoOrders', params)
-        logger.info(f"Đã gọi hủy Algo Orders cho {symbol}. Kết quả: {response}")
+        # 1. Lấy danh sách Algo Orders hiện tại
+        active_orders = get_algo_orders_for_symbol(symbol)
+        
+        # Lọc những order đang Active (NEW)
+        pending_orders = [o for o in active_orders if o.get('algoStatus') == 'NEW']
+        
+        if not pending_orders:
+            logger.info(f"Không có Algo Orders nào cần hủy cho {symbol}")
+            return True
+            
+        logger.info(f"Tìm thấy {len(pending_orders)} Algo Orders cần hủy cho {symbol}")
+        
+        # 2. Hủy từng lệnh một
+        count = 0
+        for order in pending_orders:
+            algo_id = order.get('algoId')
+            if algo_id:
+                params = {
+                    'symbol': symbol.replace('/', ''),
+                    'algoId': algo_id
+                }
+                # Gọi endpoint DELETE /fapi/v1/algoOrder (số ít)
+                response = call_binance_api_direct('DELETE', '/fapi/v1/algoOrder', params)
+                if response and 'code' in response and response['code'] != 200:
+                     logger.error(f"Lỗi hủy algoId {algo_id}: {response}")
+                else:
+                    count += 1
+                    logger.info(f"Đã hủy Algo Order {algo_id} của {symbol}")
+                    
+        logger.info(f"Đã hủy thành công {count}/{len(pending_orders)} lệnh Algo cho {symbol}")
         return True
+        
     except Exception as e:
         logger.error(f"Lỗi khi hủy Algo Orders cho {symbol}: {e}")
         return False
@@ -231,17 +257,17 @@ def do_it():
                 
                 elif has_sl or has_tp:
                     # [FIXED] Tự động Fix lỗi lẻ lệnh TRIỆT ĐỂ
-                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). RESET TOÀN BỘ...", flush=True)
-                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Đang hủy toàn bộ lệnh cũ...")
+                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). Đang làm mới lệnh cho {symbol_formatted}...", flush=True)
+                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Đang hủy lệnh chờ cũ của riêng {symbol_formatted}...")
                     
                     try:
                         # 1. Hủy lệnh thường (SL)
                         exchange.cancel_all_orders(symbol_formatted)
-                        # 2. Hủy lệnh Algo (TP - Trailing Stop) [QUAN TRỌNG]
+                        # 2. Hủy lệnh Algo (TP - Trailing Stop) - Đã sửa lỗi 404
                         cancel_all_algo_orders_direct(symbol_formatted)
                         
-                        print(f"✅ Đã dọn sạch lệnh của {symbol_formatted}. Chờ vòng sau tạo lại.", flush=True)
-                        msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Hành động:</b> Đã hủy sạch lệnh treo + Algo.\n<b>Trạng thái:</b> Chờ tạo mới."
+                        print(f"✅ Đã làm sạch lệnh của {symbol_formatted}. Chờ vòng sau tạo lại.", flush=True)
+                        msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Hành động:</b> Đã hủy lệnh chờ cũ của {symbol_formatted}.\n<b>Trạng thái:</b> Chờ tạo bộ SL/TP mới."
                         telegram_factory.send_tele(msg, cst.chat_id, True, True)
                         
                     except Exception as e:
