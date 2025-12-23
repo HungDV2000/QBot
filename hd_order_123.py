@@ -18,6 +18,11 @@ import requests
 import hmac
 import hashlib
 import urllib.parse
+import sys
+
+# Đảm bảo output realtime (không buffer)
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
 
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
@@ -38,7 +43,16 @@ logger = logging.getLogger(__name__)
 file_handler = logging.FileHandler(log_filename, encoding='utf-8')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 file_handler.setLevel(logging.INFO)
+
+# Thêm console handler để output realtime (với line buffering)
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+console_handler.setLevel(logging.INFO)
+logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
+# Không thêm basicConfig handler nữa (đã có custom handlers)
+logger.propagate = False
 
 # Order logger (ghi vào order.log chung)
 order_logger = logging.getLogger('order')
@@ -316,9 +330,24 @@ def do_it():
                 # Lấy config rate
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
                 logger.info(f"Config cho {symbol}: lenh2rate={lenh2rate}, lenh3rate={lenh3rate}")
+                sys.stdout.flush()
+
+                # Validate entry_price và rates
+                if entry_price <= 0:
+                    print(f"⚠️  {symbol}: Entry price = {entry_price} (phải > 0), bỏ qua", flush=True)
+                    logger.error(f"{symbol}: Entry price = {entry_price} (phải > 0), bỏ qua")
+                    sys.stdout.flush()
+                    continue
+                
+                if lenh2rate <= 0 or lenh3rate <= 0:
+                    print(f"⚠️  {symbol}: Rates không hợp lệ (lenh2rate={lenh2rate}, lenh3rate={lenh3rate}), bỏ qua", flush=True)
+                    logger.error(f"{symbol}: Rates không hợp lệ (lenh2rate={lenh2rate}, lenh3rate={lenh3rate}), bỏ qua")
+                    sys.stdout.flush()
+                    continue
 
                 print(f"🎯 Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side} | Leverage: {leverage}x", flush=True)
                 logger.info(f"Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side} | Leverage: {leverage}x")
+                sys.stdout.flush()
                 
                 # Sử dụng cascade manager để tạo SL + TP tự động
                 # Layer 1 vì đây là entry đầu tiên
@@ -368,9 +397,11 @@ def do_it():
                         logger.warning(f"⚠️ Cascade lớp 1 không hoàn toàn: SL={sl_order is not None}, TP={tp_order is not None}")
                         
                 except Exception as e:
-                    logger.error(f"❌ Lỗi cascade lớp 1 cho {symbol}: {e}")
+                    logger.error(f"❌ Lỗi cascade lớp 1 cho {symbol}: {e}", exc_info=True)
+                    print(f"❌ Lỗi cascade lớp 1 cho {symbol}: {e}", flush=True)
                     msg = f"🚨 <b>LỖI TẠO SL/TP</b>\n\n<b>Mã:</b> {symbol}\n<b>Lỗi:</b> {str(e)}"
                     telegram_factory.send_tele(msg, cst.chat_id, True, True)
+                    sys.stdout.flush()
                         
 
                         
@@ -412,9 +443,10 @@ def do_it():
 
         except Exception as e:
             print(f"Một lỗi đã xảy ra: {e}", flush=True)
-            logger.error(f"Lỗi xử lý position {symbol}: {e}", exc_info=True)
+            logger.error(f"Lỗi xử lý position {symbol if 'symbol' in locals() else 'N/A'}: {e}", exc_info=True)
             import traceback
             traceback.print_exc()
+            sys.stdout.flush()
 
 
 
@@ -424,13 +456,16 @@ def do_it():
 while True:
     try:
         do_it()
-        
+        sys.stdout.flush()
+        sys.stderr.flush()
         
     except Exception as e:
         print(f"Tổng Lỗi: {e}", flush=True)
         logger.error(f"Tổng lỗi: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
 
     time.sleep(cst.delay_vao_lenh_123)
 

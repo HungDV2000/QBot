@@ -518,20 +518,6 @@ def do_it():
                 logger.warning(f"Không thể set leverage: {e}")
                 leverage = 1
                 
-            # Tính amount
-            ticker = exchange.fetch_ticker(symbol)
-            lastPrice = ticker["last"]
-            amountUsdt = float(capitalMoney)
-            
-            # Validate notional >= 5 USDT (yêu cầu tối thiểu của Binance)
-            notional = amountUsdt
-            if notional < 5:
-                print(f"⚠️  {symbol}: Vốn = {amountUsdt} USDT < 5 USDT (tối thiểu của Binance), bỏ qua", flush=True)
-                logger.warning(f"{symbol}: Vốn = {amountUsdt} USDT < 5 USDT (tối thiểu của Binance), bỏ qua")
-                continue
-            
-            amount = amountUsdt / lastPrice
-            
             # CHỈ HỖ TRỢ TRAILING STOP (theo quy trình thực tế)
             activation_price_raw = float(str(d[activation_idx]).replace("%", ""))
             
@@ -566,6 +552,21 @@ def do_it():
             if activation_price <= 0:
                 print(f"⚠️  {symbol}: Activation price sau khi làm tròn = {activation_price} (phải > 0), bỏ qua. Giá gốc: {activation_price_raw}", flush=True)
                 logger.warning(f"{symbol}: Activation price sau khi làm tròn = {activation_price} (phải > 0), bỏ qua. Giá gốc: {activation_price_raw}")
+                continue
+            
+            # Tính amount và notional
+            ticker = exchange.fetch_ticker(symbol)
+            lastPrice = ticker["last"]
+            amountUsdt = float(capitalMoney)
+            amount = amountUsdt / lastPrice
+            
+            # Tính notional = activation_price * amount (Binance tính notional dựa trên activation_price)
+            notional = activation_price * amount
+            
+            # Validate notional >= 5 USDT (yêu cầu tối thiểu của Binance)
+            if notional < 5:
+                print(f"⚠️  {symbol}: Notional = {notional:.4f} USDT < 5 USDT (activation_price={activation_price}, amount={amount:.4f}, vốn={amountUsdt} USDT), bỏ qua", flush=True)
+                logger.warning(f"{symbol}: Notional = {notional:.4f} USDT < 5 USDT (activation_price={activation_price}, amount={amount:.4f}, vốn={amountUsdt} USDT), bỏ qua")
                 continue
             
             callback_rate = float(str(d[callback_idx]).replace("%", ""))
