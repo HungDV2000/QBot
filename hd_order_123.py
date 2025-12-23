@@ -12,7 +12,6 @@ import binance_utils
 import telegram_factory
 from binance_order_helper import BinanceOrderHelper
 from cascade_manager import CascadeManager, get_cascade_manager
-# Đã xóa import order_state_tracker
 from notification_manager import NotificationManager, get_notification_manager
 import requests
 import hmac
@@ -20,6 +19,7 @@ import hashlib
 import urllib.parse
 import sys
 
+# --- CẤU HÌNH HỆ THỐNG & LOGGING ---
 # Đảm bảo output realtime (không buffer)
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
@@ -31,7 +31,6 @@ os.system(f"title {file_name} - {cst.key_name}")
 log_timestamp = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
 log_filename = f'hd_order_123_{log_timestamp}.log'
 
-# Cấu hình logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -63,32 +62,7 @@ order_logger.addHandler(order_handler)
 STATE_SHORT = "SHORT"
 STATE_LONG  = "LONG"
 
-def getLenh23Rate(symbol, state):
-    # Vẫn giữ logic đọc config rate từ Sheet (không ảnh hưởng tracker)
-    if state == STATE_LONG:
-        start_row = 55
-        end_row = 104
-    elif state == STATE_SHORT:
-        start_row = 4
-        end_row = 53
-        
-    sheet_dat_lenh = gg_sheet_factory.get_dat_lenh(f"A{start_row}:G{end_row}")
-    
-    for d in sheet_dat_lenh:
-        try:
-            sym = d[0]
-            lenh2_rate = float(d[5])
-            lenh3_rate = float(d[6])
-            
-            if(is_same_pair(symbol, sym)):
-                return symbol, lenh2_rate, lenh3_rate
-        except Exception as e:
-            pass
-    
-    if state == STATE_LONG:
-        return symbol, cst.lenh2_rate_long, cst.lenh3_rate_long
-    elif state == STATE_SHORT:
-         return symbol, cst.lenh2_rate_short, cst.lenh3_rate_short
+# --- CÁC HÀM TIỆN ÍCH ---
 
 def is_same_pair(sym1, sym2):
     sym1 = sym1.replace("/", "").upper().strip()
@@ -97,7 +71,57 @@ def is_same_pair(sym1, sym2):
        return True
     return False
 
+def getLenh23Rate(symbol, state):
+    """
+    Lấy tỷ lệ SL/TP từ Google Sheet.
+    Nếu Sheet lỗi hoặc trống, lấy từ file config cst.
+    """
+    if state == STATE_LONG:
+        start_row = 55
+        end_row = 104
+    elif state == STATE_SHORT:
+        start_row = 4
+        end_row = 53
+        
+    try:
+        sheet_dat_lenh = gg_sheet_factory.get_dat_lenh(f"A{start_row}:G{end_row}")
+        
+        for d in sheet_dat_lenh:
+            try:
+                # [NÂNG CẤP] Kiểm tra độ dài dữ liệu để tránh lỗi Index
+                if len(d) < 7: 
+                    continue
+                
+                sym = d[0]
+                
+                # Kiểm tra ô rỗng
+                val_sl = d[5].strip() if d[5] else ""
+                val_tp = d[6].strip() if d[6] else ""
+                
+                if not val_sl or not val_tp:
+                    continue
+                    
+                lenh2_rate = float(val_sl)
+                lenh3_rate = float(val_tp)
+                
+                if(is_same_pair(symbol, sym)):
+                    return symbol, lenh2_rate, lenh3_rate
+            except ValueError:
+                continue # Bỏ qua dòng lỗi định dạng số
+            except Exception:
+                pass
+                
+    except Exception as e:
+        logger.error(f"Lỗi đọc Google Sheet: {e}")
+
+    # Fallback về Config mặc định
+    if state == STATE_LONG:
+        return symbol, cst.lenh2_rate_long, cst.lenh3_rate_long
+    elif state == STATE_SHORT:
+         return symbol, cst.lenh2_rate_short, cst.lenh3_rate_short
+
 def call_binance_api_direct(method, endpoint, params=None, api_key=None, secret_key=None):
+    """Gọi API Binance trực tiếp để lấy Algo Orders (nhanh và đủ thông tin hơn ccxt chuẩn)"""
     base_url = 'https://fapi.binance.com'
     url = f"{base_url}{endpoint}"
     
@@ -144,29 +168,27 @@ def get_algo_orders_for_symbol(symbol):
         return []
 
 def has_sl_tp_orders(symbol, exchange):
+    """Kiểm tra xem đã có đủ cặp SL và TP chưa"""
     try:
         algo_orders = get_algo_orders_for_symbol(symbol)
         has_sl = False
         has_tp = False
         
+        # 1. Check TP (Trailing Stop trong Algo Orders)
         active_algo_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
-        
         for order in active_algo_orders:
             algo_type = order.get('algoType', '').upper()
             reduce_only = order.get('reduceOnly', False)
-            
-            # Check TP (Trailing Stop)
             if algo_type in ['CONDITIONAL', 'VP'] and reduce_only:
                 has_tp = True
         
-        # Check SL (Stop Limit/Stop Market)
+        # 2. Check SL (Stop Limit/Market trong Open Orders)
         try:
             open_orders = exchange.fetch_open_orders(symbol)
             for order in open_orders:
                 order_type = order.get('type', '').upper()
                 info = order.get('info', {})
                 reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
-                
                 if order_type in ['STOP', 'STOP_LIMIT'] and reduce_only:
                     has_sl = True
         except Exception as e:
@@ -178,8 +200,10 @@ def has_sl_tp_orders(symbol, exchange):
         logger.error(f"Lỗi khi kiểm tra SL/TP orders cho {symbol}: {e}", exc_info=True)
         return False, False
 
+# --- LOGIC CHÍNH ---
+
 def do_it():
-    logger.info(f"{datetime.now()}. Scan Vào Lệnh 123----------------------------------------------------")
+    logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Auto-Fix Mode) -------------------------")
     exchange_id = 'binance'
     exchange_class = getattr(ccxt, exchange_id)
     exchange = exchange_class({
@@ -211,24 +235,39 @@ def do_it():
                 print(f"🔍 Kiểm tra position: {position['symbol']}, Amount: {amount}", flush=True)
                 symbol_formatted = position['symbol'].replace("USDT", "/USDT")
                 
-                # --- CHECK TRÙNG LỆNH ---
+                # --- [LOGIC QUAN TRỌNG] KIỂM TRA & SỬA LỖI LỆNH ---
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
                 
                 if has_sl and has_tp:
-                    print(f"⏭️  {symbol_formatted} đã có SL và TP, bỏ qua", flush=True)
+                    print(f"⏭️  {symbol_formatted} đã ĐỦ SL và TP. Bỏ qua.", flush=True)
                     continue
                 
                 elif has_sl or has_tp:
-                    print(f"⚠️  {symbol_formatted} đang bị lẻ lệnh (SL={has_sl}, TP={has_tp}). Vui lòng XÓA TAY lệnh chờ cũ trên sàn để Bot tạo lại.", flush=True)
-                    logger.warning(f"{symbol_formatted} chỉ có một phần SL/TP. Bỏ qua.")
+                    # [NÂNG CẤP] Tự động Fix lỗi lẻ lệnh
+                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). Đang Reset...", flush=True)
+                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Đang hủy lệnh cũ để tạo mới...")
+                    
+                    try:
+                        # Hủy toàn bộ lệnh chờ để bot tự setup lại từ đầu sạch sẽ
+                        exchange.cancel_all_orders(symbol_formatted)
+                        print(f"✅ Đã hủy lệnh cũ của {symbol_formatted}. Chờ vòng lặp sau tạo lại.", flush=True)
+                        
+                        msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Tình trạng:</b> Lẻ lệnh (SL/TP thiếu)\n<b>Hành động:</b> Đã hủy lệnh cũ, chờ tạo mới."
+                        telegram_factory.send_tele(msg, cst.chat_id, True, True)
+                        
+                    except Exception as e:
+                        print(f"❌ Lỗi khi hủy lệnh cũ {symbol_formatted}: {e}", flush=True)
+                        logger.error(f"Lỗi cancel_all_orders {symbol_formatted}: {e}")
+                    
+                    # Bỏ qua vòng này, để vòng sau bot thấy "Trống" sẽ tạo lại chuẩn hơn
                     continue 
-                # ------------------------
+                # --------------------------------------------------
                 
-                # Logic tạo lệnh mới
+                # --- TẠO LỆNH MỚI (Khi không có SL và TP) ---
                 symbol = symbol_formatted
                 position_amt = float(position['positionAmt'])
                 
-                # Lấy Entry Price
+                # Lấy Entry Price an toàn
                 entry_price = None
                 if 'entryPrice' in position and position['entryPrice']:
                     try: entry_price = float(position['entryPrice'])
@@ -238,16 +277,18 @@ def do_it():
                     try:
                         ticker = exchange.fetch_ticker(symbol_formatted)
                         entry_price = float(ticker['last'])
+                        logger.warning(f"{symbol}: Dùng giá thị trường {entry_price}")
                     except: continue
                 
                 is_long = position_amt > 0
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
                 
-                # Lấy Rate config
+                # Lấy Rate config (An toàn với hàm mới)
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
 
                 if entry_price <= 0 or lenh2rate <= 0 or lenh3rate <= 0:
+                    logger.error(f"{symbol}: Config lỗi (Entry={entry_price}, L2={lenh2rate}, L3={lenh3rate}). Skip.")
                     continue
 
                 print(f"🎯 Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side}", flush=True)
@@ -273,9 +314,6 @@ def do_it():
                     tp_order = result.get('tp_order')
                     
                     if sl_order and tp_order:
-                        # --- ĐÃ XÓA PHẦN TRACKER UPDATE TẠI ĐÂY ---
-                        
-                        # Chỉ còn Log file và Telegram
                         order_logger.info(f"LỆNH 2 (SL) | {symbol} | {side} | Entry: {entry_price} | SL Rate: {lenh2rate}")
                         order_logger.info(f"LỆNH 3 (TP) | {symbol} | {side} | Entry: {entry_price} | TP Rate: {lenh3rate} | Callback: {cst.lenh3_callback_rate}%")
                         
