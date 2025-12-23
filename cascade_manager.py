@@ -147,17 +147,38 @@ class CascadeManager:
         # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
         # Ví dụ: lenh2_rate=0.3 → SL kích hoạt khi giá thay đổi 30% (không phải 3% khi leverage=10x)
         if is_long:
-            stop_price = entry_price * (1 - lenh2_rate)
+            stop_price_raw = entry_price * (1 - lenh2_rate)
             order_side = 'sell'
         else:
-            stop_price = entry_price * (1 + lenh2_rate)
+            stop_price_raw = entry_price * (1 + lenh2_rate)
             order_side = 'buy'
         
-        precision = binance_utils.get_price_precision(symbol)
-        stop_price = round(stop_price, precision)
+        # Validate giá trước khi làm tròn
+        if stop_price_raw <= 0:
+            raise ValueError(f"Stop price tính được = {stop_price_raw} (phải > 0). Entry: {entry_price}, Rate: {lenh2_rate}")
+        
+        # Sử dụng exchange.price_to_precision() để đảm bảo đúng format Binance
+        try:
+            stop_price_str = self.exchange.price_to_precision(symbol, stop_price_raw)
+            stop_price = float(stop_price_str)
+        except Exception as e:
+            # Fallback: dùng round với precision
+            try:
+                precision = binance_utils.get_price_precision(symbol)
+                if precision is None or precision < 0:
+                    precision = 3  # Default precision
+                stop_price = round(stop_price_raw, precision)
+                logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+            except Exception as e2:
+                raise ValueError(f"Không thể làm tròn stop_price cho {symbol}: {e2}")
+        
+        # Validate giá sau khi làm tròn (có thể bị làm tròn thành 0)
+        if stop_price <= 0:
+            raise ValueError(f"Stop price sau khi làm tròn = {stop_price} (phải > 0). Giá gốc: {stop_price_raw}")
+        
         limit_price = stop_price  # Stop Limit
         
-        logger.info(f"Tạo SL {layer_num}{chr(97+1)}: {symbol} {order_side} @ {stop_price}")
+        logger.info(f"Tạo SL {layer_num}{chr(97+1)}: {symbol} {order_side} @ {stop_price} (từ {stop_price_raw:.8f})")
         
         order = self.order_helper.create_stop_limit_order(
             symbol=symbol,
@@ -188,16 +209,36 @@ class CascadeManager:
         # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
         # Ví dụ: lenh3_rate=0.6 → TP kích hoạt khi giá thay đổi 60% (không phải 6% khi leverage=10x)
         if is_long:
-            activation_price = entry_price * (1 + lenh3_rate)
+            activation_price_raw = entry_price * (1 + lenh3_rate)
             order_side = 'sell'
         else:
-            activation_price = entry_price * (1 - lenh3_rate)
+            activation_price_raw = entry_price * (1 - lenh3_rate)
             order_side = 'buy'
         
-        precision = binance_utils.get_price_precision(symbol)
-        activation_price = round(activation_price, precision)
+        # Validate giá trước khi làm tròn
+        if activation_price_raw <= 0:
+            raise ValueError(f"Activation price tính được = {activation_price_raw} (phải > 0). Entry: {entry_price}, Rate: {lenh3_rate}")
         
-        logger.info(f"Tạo TP {layer_num}{chr(97+2)}: {symbol} {order_side} @ {activation_price}, callback={callback_rate}%")
+        # Sử dụng exchange.price_to_precision() để đảm bảo đúng format Binance
+        try:
+            activation_price_str = self.exchange.price_to_precision(symbol, activation_price_raw)
+            activation_price = float(activation_price_str)
+        except Exception as e:
+            # Fallback: dùng round với precision
+            try:
+                precision = binance_utils.get_price_precision(symbol)
+                if precision is None or precision < 0:
+                    precision = 3  # Default precision
+                activation_price = round(activation_price_raw, precision)
+                logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+            except Exception as e2:
+                raise ValueError(f"Không thể làm tròn activation_price cho {symbol}: {e2}")
+        
+        # Validate giá sau khi làm tròn (có thể bị làm tròn thành 0)
+        if activation_price <= 0:
+            raise ValueError(f"Activation price sau khi làm tròn = {activation_price} (phải > 0). Giá gốc: {activation_price_raw}")
+        
+        logger.info(f"Tạo TP {layer_num}{chr(97+2)}: {symbol} {order_side} @ {activation_price} (từ {activation_price_raw:.8f}), callback={callback_rate}%")
         
         order = self.order_helper.create_trailing_stop_order(
             symbol=symbol,
