@@ -7,16 +7,18 @@ import hashlib
 import urllib.parse
 import json
 import sys
+import os
 
-# Cấu hình hiển thị
+# Cấu hình hiển thị console
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+os.system(f"title CHECK ORDER TOOL")
 
-print("--- TOOL KIỂM TRA TRẠNG THÁI LỆNH TRÊN BINANCE ---")
+print("--- TOOL KIỂM TRA CHI TIẾT LỆNH TRÊN BINANCE ---")
 symbol_input = input("Nhập mã Coin (ví dụ VELODROME/USDT): ").strip().upper()
 if "/" not in symbol_input:
     symbol_input = symbol_input.replace("USDT", "/USDT")
 
-print(f"\n🔍 Đang quét dữ liệu cho: {symbol_input}...")
+print(f"\n🔍 Đang quét dữ liệu gốc từ sàn cho: {symbol_input}...")
 
 # 1. Kết nối Binance
 exchange = ccxt.binance({
@@ -25,7 +27,7 @@ exchange = ccxt.binance({
     'options': {'defaultType': 'future'}
 })
 
-# 2. Hàm gọi API trực tiếp (để lấy Algo Orders)
+# 2. Hàm gọi API trực tiếp (để lấy dữ liệu thô)
 def call_binance_api(endpoint, params=None):
     base_url = 'https://fapi.binance.com'
     url = f"{base_url}{endpoint}"
@@ -49,7 +51,7 @@ def call_binance_api(endpoint, params=None):
         print(f"Lỗi gọi API: {e}")
         return []
 
-# --- BƯỚC 1: KIỂM TRA OPEN ORDERS (Lệnh thường) ---
+# --- PHẦN 1: KIỂM TRA OPEN ORDERS (Lệnh thường) ---
 print(f"\n{'='*20} 1. DANH SÁCH OPEN ORDERS (Lệnh thường) {'='*20}")
 try:
     open_orders = exchange.fetch_open_orders(symbol_input)
@@ -60,14 +62,14 @@ try:
             print(f"\n[Open Order #{i+1}]")
             print(f"   - ID: {order['id']}")
             print(f"   - Type (CCXT): {order['type']}")
-            print(f"   - Type (Raw): {order['info'].get('type')}") # Quan trọng
-            print(f"   - Side: {order['side']}")
+            print(f"   - Type (Gốc): {order['info'].get('type')}") 
             print(f"   - ReduceOnly: {order['reduceOnly']}")
-            print(f"   - Status: {order['status']}")
+            print(f"   - Price: {order['price']}")
+            print(f"   - StopPrice: {order['info'].get('stopPrice')}")
 except Exception as e:
     print(f"Lỗi lấy Open Orders: {e}")
 
-# --- BƯỚC 2: KIỂM TRA ALGO ORDERS (Lệnh điều kiện/Trailing) ---
+# --- PHẦN 2: KIỂM TRA ALGO ORDERS (Lệnh điều kiện) ---
 print(f"\n{'='*20} 2. DANH SÁCH ALGO ORDERS (Lệnh điều kiện) {'='*20}")
 try:
     algo_params = {'symbol': symbol_input.replace('/', '')}
@@ -82,49 +84,59 @@ try:
         for i, order in enumerate(active_algos):
             print(f"\n[Algo Order #{i+1}]")
             print(f"   - AlgoID: {order.get('algoId')}")
-            print(f"   - AlgoType: {order.get('algoType')}") # Cực kỳ quan trọng
-            print(f"   - Side: {order.get('side')}")
+            print(f"   - AlgoType: {order.get('algoType')}") 
+            print(f"   - Symbol: {order.get('symbol')}")
             print(f"   - ReduceOnly: {order.get('reduceOnly')}")
-            print(f"   - Status: {order.get('algoStatus')}")
+            
+            # --- CÁC THÔNG SỐ QUAN TRỌNG ĐỂ PHÂN BIỆT ---
+            cb_rate = order.get('callbackRate')
+            act_price = order.get('activatePrice')
+            stop_price = order.get('stopPrice')
+            
+            print(f"   👉 callbackRate: {cb_rate} (Quan trọng)")
+            print(f"   👉 activatePrice: {act_price}")
+            print(f"   👉 stopPrice: {stop_price}")
+            
 except Exception as e:
     print(f"Lỗi lấy Algo Orders: {e}")
 
-# --- BƯỚC 3: MÔ PHỎNG LOGIC CHECK CỦA BOT ---
-print(f"\n{'='*20} 3. KẾT QUẢ CHECK CỦA BOT HIỆN TẠI {'='*20}")
+# --- PHẦN 3: GIẢ LẬP LOGIC KIỂM TRA MỚI ---
+print(f"\n{'='*20} 3. TEST NHẬN DIỆN SL/TP {'='*20}")
 
-has_sl = False
-has_tp = False
+detected_sl = False
+detected_tp = False
 
-# Check trong Open Orders
-for order in open_orders:
-    o_type = str(order['type']).upper()
-    o_raw_type = str(order['info'].get('type')).upper()
-    is_reduce = order['reduceOnly']
-    
-    # Logic hiện tại của bot (kiểm tra xem khớp không)
-    if o_type in ['STOP', 'STOP_LIMIT', 'STOP_MARKET'] and is_reduce:
-        has_sl = True
-        print(f"✅ Tìm thấy SL trong Open Orders (Type: {o_type})")
-
-# Check trong Algo Orders
+# Check Algo
 for order in active_algos:
-    a_type = str(order.get('algoType')).upper()
-    is_reduce = order.get('reduceOnly')
+    atype = str(order.get('algoType')).upper()
+    cb_rate = float(order.get('callbackRate') or 0)
     
-    if a_type in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and is_reduce:
-        has_tp = True
-        print(f"✅ Tìm thấy TP trong Algo Orders (Type: {a_type})")
+    # Logic nhận diện TP (Trailing Stop)
+    if atype in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and cb_rate > 0:
+        detected_tp = True
+        print(f"✅ PHÁT HIỆN TP (Trailing): ID={order.get('algoId')} | Rate={cb_rate}%")
         
-    if a_type in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LOSS_MARKET', 'STOP_LIMIT'] and is_reduce:
-        has_sl = True
-        print(f"✅ Tìm thấy SL trong Algo Orders (Type: {a_type})")
+    # Logic nhận diện SL (Stop Limit/Market)
+    if atype in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LIMIT']:
+        detected_sl = True
+        print(f"✅ PHÁT HIỆN SL (Type chuẩn): ID={order.get('algoId')}")
+    elif atype == 'CONDITIONAL' and cb_rate == 0:
+        detected_sl = True
+        print(f"✅ PHÁT HIỆN SL (Type Conditional): ID={order.get('algoId')} | Rate=0%")
 
-print(f"\n---> KẾT LUẬN CUỐI CÙNG: SL={has_sl} | TP={has_tp}")
-if has_sl and has_tp:
-    print("🎉 OK: Bot sẽ thấy đủ lệnh -> BỎ QUA (Đúng ý muốn)")
-elif has_sl or has_tp:
-    print("⚠️  LỖI: Bot thấy lẻ lệnh -> HỦY RỒI TẠO LẠI (Vòng lặp vô tận)")
+# Check Open Orders (Dự phòng)
+if not detected_sl:
+    for order in open_orders:
+        otype = str(order['type']).upper()
+        if otype in ['STOP', 'STOP_LIMIT', 'STOP_MARKET']:
+             detected_sl = True
+             print(f"✅ PHÁT HIỆN SL (Trong OpenOrder): ID={order['id']}")
+
+print(f"\n---> KẾT QUẢ: SL={detected_sl} | TP={detected_tp}")
+
+if detected_sl and detected_tp:
+    print("🎉 KẾT LUẬN: ĐỦ CẶP LỆNH. (Code mới sẽ chạy NGON)")
 else:
-    print("⚪ TRỐNG: Bot sẽ tạo mới")
+    print("⚠️ KẾT LUẬN: VẪN THIẾU/LẺ LỆNH.")
 
 input("\nNhấn Enter để thoát...")
