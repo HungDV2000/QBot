@@ -522,6 +522,14 @@ def do_it():
             ticker = exchange.fetch_ticker(symbol)
             lastPrice = ticker["last"]
             amountUsdt = float(capitalMoney)
+            
+            # Validate notional >= 5 USDT (yêu cầu tối thiểu của Binance)
+            notional = amountUsdt
+            if notional < 5:
+                print(f"⚠️  {symbol}: Vốn = {amountUsdt} USDT < 5 USDT (tối thiểu của Binance), bỏ qua", flush=True)
+                logger.warning(f"{symbol}: Vốn = {amountUsdt} USDT < 5 USDT (tối thiểu của Binance), bỏ qua")
+                continue
+            
             amount = amountUsdt / lastPrice
             
             # CHỈ HỖ TRỢ TRAILING STOP (theo quy trình thực tế)

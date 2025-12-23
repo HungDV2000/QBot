@@ -288,10 +288,28 @@ def do_it():
                 symbol = symbol_formatted
                 
                 position_amt = float(position['positionAmt'])
-                entry_price = float(position['entryPrice'])
+                
+                # Lấy entryPrice an toàn (có thể không có trong position dict)
+                entry_price = None
+                if 'entryPrice' in position and position['entryPrice']:
+                    try:
+                        entry_price = float(position['entryPrice'])
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Nếu không có entryPrice, lấy từ current price
+                if entry_price is None or entry_price <= 0:
+                    try:
+                        ticker = exchange.fetch_ticker(symbol_formatted)
+                        entry_price = float(ticker['last'])
+                        logger.warning(f"{symbol_formatted}: Không có entryPrice trong position, dùng giá hiện tại: {entry_price}")
+                    except Exception as e:
+                        logger.error(f"{symbol_formatted}: Không thể lấy entryPrice hoặc giá hiện tại: {e}", exc_info=True)
+                        continue
+                
                 is_short = position_amt < 0
                 is_long = position_amt > 0
-                leverage = int(position['leverage'])
+                leverage = int(position.get('leverage', 1))
                 
                 side = STATE_LONG if is_long else STATE_SHORT
                 
