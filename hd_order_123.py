@@ -145,23 +145,22 @@ def get_algo_orders_for_symbol(symbol):
 
 def cancel_all_algo_orders_direct(symbol):
     """
-    [FIXED] Hủy từng Algo Order một vì Binance không hỗ trợ hủy hàng loạt qua endpoint cũ.
+    [FIXED] Hủy từng Algo Order.
+    - Sửa lỗi so sánh code '200' vs 200.
+    - Thêm cảnh báo Telegram nếu hủy thất bại.
     """
     try:
-        # 1. Lấy danh sách Algo Orders hiện tại
         active_orders = get_algo_orders_for_symbol(symbol)
-        
-        # Lọc những order đang Active (NEW)
         pending_orders = [o for o in active_orders if o.get('algoStatus') == 'NEW']
         
         if not pending_orders:
-            logger.info(f"Không có Algo Orders nào cần hủy cho {symbol}")
             return True
             
         logger.info(f"Tìm thấy {len(pending_orders)} Algo Orders cần hủy cho {symbol}")
         
-        # 2. Hủy từng lệnh một
         count = 0
+        failed_orders = []
+
         for order in pending_orders:
             algo_id = order.get('algoId')
             if algo_id:
@@ -169,19 +168,34 @@ def cancel_all_algo_orders_direct(symbol):
                     'symbol': symbol.replace('/', ''),
                     'algoId': algo_id
                 }
-                # Gọi endpoint DELETE /fapi/v1/algoOrder (số ít)
                 response = call_binance_api_direct('DELETE', '/fapi/v1/algoOrder', params)
-                if response and 'code' in response and response['code'] != 200:
-                     logger.error(f"Lỗi hủy algoId {algo_id}: {response}")
-                else:
+                
+                # [FIX QUAN TRỌNG] Kiểm tra thành công an toàn hơn (chấp nhận cả int 200 và str '200')
+                is_success = False
+                if response:
+                    code = response.get('code')
+                    # Nếu code là 200 hoặc '200' -> OK
+                    if str(code) == '200':
+                        is_success = True
+                
+                if is_success:
                     count += 1
-                    logger.info(f"Đã hủy Algo Order {algo_id} của {symbol}")
-                    
+                else:
+                    failed_orders.append(algo_id)
+                    logger.error(f"Lỗi hủy algoId {algo_id}: {response}")
+
         logger.info(f"Đã hủy thành công {count}/{len(pending_orders)} lệnh Algo cho {symbol}")
+        
+        # [CẢNH BÁO TELEGRAM] Nếu có lệnh không hủy được
+        if failed_orders:
+            msg = f"⚠️ <b>CẢNH BÁO KHẨN CẤP</b>\n\n<b>Mã:</b> {symbol}\n<b>Lỗi:</b> Không thể hủy {len(failed_orders)} lệnh Algo (Trailing Stop).\n<b>Hành động:</b> Vui lòng vào app Binance HỦY TAY ngay lập tức để tránh trùng lệnh!"
+            telegram_factory.send_tele(msg, cst.chat_id, True, True)
+            return False # Báo thất bại để vòng lặp chính không tạo lệnh mới đè lên
+
         return True
         
     except Exception as e:
-        logger.error(f"Lỗi khi hủy Algo Orders cho {symbol}: {e}")
+        logger.error(f"Lỗi ngoại lệ khi hủy Algo Orders cho {symbol}: {e}")
         return False
 
 def has_sl_tp_orders(symbol, exchange):
@@ -263,12 +277,15 @@ def do_it():
                     try:
                         # 1. Hủy lệnh thường (SL)
                         exchange.cancel_all_orders(symbol_formatted)
-                        # 2. Hủy lệnh Algo (TP - Trailing Stop) - Đã sửa lỗi 404
-                        cancel_all_algo_orders_direct(symbol_formatted)
+                        # 2. Hủy lệnh Algo (TP - Trailing Stop) - Có check lỗi
+                        is_algo_cancelled = cancel_all_algo_orders_direct(symbol_formatted)
                         
-                        print(f"✅ Đã làm sạch lệnh của {symbol_formatted}. Chờ vòng sau tạo lại.", flush=True)
-                        msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Hành động:</b> Đã hủy lệnh chờ cũ của {symbol_formatted}.\n<b>Trạng thái:</b> Chờ tạo bộ SL/TP mới."
-                        telegram_factory.send_tele(msg, cst.chat_id, True, True)
+                        if is_algo_cancelled:
+                            print(f"✅ Đã làm sạch lệnh của {symbol_formatted}. Chờ vòng sau tạo lại.", flush=True)
+                            msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Hành động:</b> Đã hủy lệnh chờ cũ.\n<b>Trạng thái:</b> Chờ tạo bộ SL/TP mới."
+                            telegram_factory.send_tele(msg, cst.chat_id, True, True)
+                        else:
+                            print(f"❌ Không thể hủy hết lệnh Algo của {symbol_formatted}. Dừng xử lý mã này.", flush=True)
                         
                     except Exception as e:
                         print(f"❌ Lỗi khi hủy lệnh cũ {symbol_formatted}: {e}", flush=True)
