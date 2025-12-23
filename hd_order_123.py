@@ -20,14 +20,12 @@ import urllib.parse
 import sys
 
 # --- CẤU HÌNH HỆ THỐNG & LOGGING ---
-# Đảm bảo output realtime (không buffer)
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
 sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
 
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Tạo tên file log với timestamp
 log_timestamp = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
 log_filename = f'hd_order_123_{log_timestamp}.log'
 
@@ -38,12 +36,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# File handler
 file_handler = logging.FileHandler(log_filename, encoding='utf-8')
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 file_handler.setLevel(logging.INFO)
 
-# Console handler
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 console_handler.setLevel(logging.INFO)
@@ -52,7 +48,6 @@ logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 logger.propagate = False
 
-# Order logger (ghi vào order.log chung)
 order_logger = logging.getLogger('order')
 order_logger.setLevel(logging.INFO)
 order_handler = logging.FileHandler('order.log', encoding='utf-8')
@@ -72,59 +67,38 @@ def is_same_pair(sym1, sym2):
     return False
 
 def getLenh23Rate(symbol, state):
-    """
-    Lấy tỷ lệ SL/TP từ Google Sheet.
-    Nếu Sheet lỗi hoặc trống, lấy từ file config cst.
-    """
     if state == STATE_LONG:
         start_row = 55
         end_row = 104
     elif state == STATE_SHORT:
         start_row = 4
         end_row = 53
-        
     try:
         sheet_dat_lenh = gg_sheet_factory.get_dat_lenh(f"A{start_row}:G{end_row}")
-        
         for d in sheet_dat_lenh:
             try:
-                # [NÂNG CẤP] Kiểm tra độ dài dữ liệu để tránh lỗi Index
-                if len(d) < 7: 
-                    continue
-                
+                if len(d) < 7: continue
                 sym = d[0]
-                
-                # Kiểm tra ô rỗng
                 val_sl = d[5].strip() if d[5] else ""
                 val_tp = d[6].strip() if d[6] else ""
-                
-                if not val_sl or not val_tp:
-                    continue
-                    
+                if not val_sl or not val_tp: continue
                 lenh2_rate = float(val_sl)
                 lenh3_rate = float(val_tp)
-                
                 if(is_same_pair(symbol, sym)):
                     return symbol, lenh2_rate, lenh3_rate
-            except ValueError:
-                continue # Bỏ qua dòng lỗi định dạng số
-            except Exception:
-                pass
-                
+            except ValueError: continue 
+            except Exception: pass
     except Exception as e:
         logger.error(f"Lỗi đọc Google Sheet: {e}")
 
-    # Fallback về Config mặc định
     if state == STATE_LONG:
         return symbol, cst.lenh2_rate_long, cst.lenh3_rate_long
     elif state == STATE_SHORT:
          return symbol, cst.lenh2_rate_short, cst.lenh3_rate_short
 
 def call_binance_api_direct(method, endpoint, params=None, api_key=None, secret_key=None):
-    """Gọi API Binance trực tiếp để lấy Algo Orders (nhanh và đủ thông tin hơn ccxt chuẩn)"""
     base_url = 'https://fapi.binance.com'
     url = f"{base_url}{endpoint}"
-    
     if params is None: params = {}
     if api_key is None: api_key = cst.key_binance
     if secret_key is None: secret_key = cst.secret_binance
@@ -141,40 +115,56 @@ def call_binance_api_direct(method, endpoint, params=None, api_key=None, secret_
     headers = {'X-MBX-APIKEY': api_key}
     
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        if method.upper() == 'GET':
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+        elif method.upper() == 'DELETE':
+            response = requests.delete(url, params=params, headers=headers, timeout=10)
+        else:
+            return None
+            
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        logger.error(f"Lỗi khi gọi Binance API trực tiếp: {e}")
+        logger.error(f"Lỗi khi gọi Binance API trực tiếp ({method} {endpoint}): {e}")
         return None
 
 def get_algo_orders_for_symbol(symbol):
     try:
         params = {'symbol': symbol.replace('/', '')}
         response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
-        
         if not response: return []
-        
-        if isinstance(response, list):
-            return response
+        if isinstance(response, list): return response
         elif isinstance(response, dict):
             if 'data' in response: return response['data']
             elif response.get('code') == 200: return response
             else: return []
         else: return []
-            
     except Exception as e:
-        logger.error(f"Lỗi khi lấy algo orders cho {symbol}: {e}", exc_info=True)
+        logger.error(f"Lỗi khi lấy algo orders: {e}", exc_info=True)
         return []
 
+def cancel_all_algo_orders_direct(symbol):
+    """
+    [FIX QUAN TRỌNG] Hủy toàn bộ ALGO ORDERS (Trailing Stop) 
+    bằng cách gọi API trực tiếp, vì ccxt.cancel_all_orders thường bỏ sót loại này.
+    """
+    try:
+        params = {'symbol': symbol.replace('/', '')}
+        # Endpoint DELETE /fapi/v1/allAlgoOrders hủy tất cả algo orders của symbol
+        response = call_binance_api_direct('DELETE', '/fapi/v1/allAlgoOrders', params)
+        logger.info(f"Đã gọi hủy Algo Orders cho {symbol}. Kết quả: {response}")
+        return True
+    except Exception as e:
+        logger.error(f"Lỗi khi hủy Algo Orders cho {symbol}: {e}")
+        return False
+
 def has_sl_tp_orders(symbol, exchange):
-    """Kiểm tra xem đã có đủ cặp SL và TP chưa"""
     try:
         algo_orders = get_algo_orders_for_symbol(symbol)
         has_sl = False
         has_tp = False
         
-        # 1. Check TP (Trailing Stop trong Algo Orders)
+        # Check TP (Trailing Stop)
         active_algo_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
         for order in active_algo_orders:
             algo_type = order.get('algoType', '').upper()
@@ -182,7 +172,7 @@ def has_sl_tp_orders(symbol, exchange):
             if algo_type in ['CONDITIONAL', 'VP'] and reduce_only:
                 has_tp = True
         
-        # 2. Check SL (Stop Limit/Market trong Open Orders)
+        # Check SL (Stop Market/Limit)
         try:
             open_orders = exchange.fetch_open_orders(symbol)
             for order in open_orders:
@@ -192,12 +182,11 @@ def has_sl_tp_orders(symbol, exchange):
                 if order_type in ['STOP', 'STOP_LIMIT'] and reduce_only:
                     has_sl = True
         except Exception as e:
-            logger.warning(f"Không thể lấy open orders cho {symbol}: {e}")
+            logger.warning(f"Không thể lấy open orders: {e}")
         
         return has_sl, has_tp
-        
     except Exception as e:
-        logger.error(f"Lỗi khi kiểm tra SL/TP orders cho {symbol}: {e}", exc_info=True)
+        logger.error(f"Lỗi check SL/TP: {e}", exc_info=True)
         return False, False
 
 # --- LOGIC CHÍNH ---
@@ -228,14 +217,12 @@ def do_it():
         try:
             try:
                 amount = float(position['positionAmt'])
-            except:
-                amount = 0.0
+            except: amount = 0.0
 
             if amount != 0:
                 print(f"🔍 Kiểm tra position: {position['symbol']}, Amount: {amount}", flush=True)
                 symbol_formatted = position['symbol'].replace("USDT", "/USDT")
                 
-                # --- [LOGIC QUAN TRỌNG] KIỂM TRA & SỬA LỖI LỆNH ---
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
                 
                 if has_sl and has_tp:
@@ -243,31 +230,30 @@ def do_it():
                     continue
                 
                 elif has_sl or has_tp:
-                    # [NÂNG CẤP] Tự động Fix lỗi lẻ lệnh
-                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). Đang Reset...", flush=True)
-                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Đang hủy lệnh cũ để tạo mới...")
+                    # [FIXED] Tự động Fix lỗi lẻ lệnh TRIỆT ĐỂ
+                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). RESET TOÀN BỘ...", flush=True)
+                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Đang hủy toàn bộ lệnh cũ...")
                     
                     try:
-                        # Hủy toàn bộ lệnh chờ để bot tự setup lại từ đầu sạch sẽ
+                        # 1. Hủy lệnh thường (SL)
                         exchange.cancel_all_orders(symbol_formatted)
-                        print(f"✅ Đã hủy lệnh cũ của {symbol_formatted}. Chờ vòng lặp sau tạo lại.", flush=True)
+                        # 2. Hủy lệnh Algo (TP - Trailing Stop) [QUAN TRỌNG]
+                        cancel_all_algo_orders_direct(symbol_formatted)
                         
-                        msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Tình trạng:</b> Lẻ lệnh (SL/TP thiếu)\n<b>Hành động:</b> Đã hủy lệnh cũ, chờ tạo mới."
+                        print(f"✅ Đã dọn sạch lệnh của {symbol_formatted}. Chờ vòng sau tạo lại.", flush=True)
+                        msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Hành động:</b> Đã hủy sạch lệnh treo + Algo.\n<b>Trạng thái:</b> Chờ tạo mới."
                         telegram_factory.send_tele(msg, cst.chat_id, True, True)
                         
                     except Exception as e:
                         print(f"❌ Lỗi khi hủy lệnh cũ {symbol_formatted}: {e}", flush=True)
-                        logger.error(f"Lỗi cancel_all_orders {symbol_formatted}: {e}")
+                        logger.error(f"Lỗi cancel_all {symbol_formatted}: {e}")
                     
-                    # Bỏ qua vòng này, để vòng sau bot thấy "Trống" sẽ tạo lại chuẩn hơn
                     continue 
-                # --------------------------------------------------
                 
-                # --- TẠO LỆNH MỚI (Khi không có SL và TP) ---
+                # --- TẠO LỆNH MỚI ---
                 symbol = symbol_formatted
                 position_amt = float(position['positionAmt'])
                 
-                # Lấy Entry Price an toàn
                 entry_price = None
                 if 'entryPrice' in position and position['entryPrice']:
                     try: entry_price = float(position['entryPrice'])
@@ -277,25 +263,20 @@ def do_it():
                     try:
                         ticker = exchange.fetch_ticker(symbol_formatted)
                         entry_price = float(ticker['last'])
-                        logger.warning(f"{symbol}: Dùng giá thị trường {entry_price}")
                     except: continue
                 
                 is_long = position_amt > 0
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
                 
-                # Lấy Rate config (An toàn với hàm mới)
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
 
                 if entry_price <= 0 or lenh2rate <= 0 or lenh3rate <= 0:
-                    logger.error(f"{symbol}: Config lỗi (Entry={entry_price}, L2={lenh2rate}, L3={lenh3rate}). Skip.")
                     continue
 
                 print(f"🎯 Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side}", flush=True)
-                logger.info(f"Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side}")
                 
                 try:
-                    # Gọi Cascade để đặt lệnh
                     result = cascade_mgr.on_entry_filled(
                         symbol=symbol,
                         layer_num=1,
@@ -314,14 +295,14 @@ def do_it():
                     tp_order = result.get('tp_order')
                     
                     if sl_order and tp_order:
-                        order_logger.info(f"LỆNH 2 (SL) | {symbol} | {side} | Entry: {entry_price} | SL Rate: {lenh2rate}")
-                        order_logger.info(f"LỆNH 3 (TP) | {symbol} | {side} | Entry: {entry_price} | TP Rate: {lenh3rate} | Callback: {cst.lenh3_callback_rate}%")
+                        order_logger.info(f"LỆNH 2 (SL) | {symbol} | {side} | Entry: {entry_price}")
+                        order_logger.info(f"LỆNH 3 (TP) | {symbol} | {side} | Entry: {entry_price}")
                         
-                        msg = f"✅ <b>ĐÃ TẠO SL + TP CHO LỚP 1</b>\n\n<b>Mã:</b> {symbol}\n<b>Entry Price:</b> {entry_price}\n<b>SL Order:</b> {sl_order.get('id')}\n<b>TP Order:</b> {tp_order.get('id')}"
+                        msg = f"✅ <b>ĐÃ TẠO SL + TP CHO LỚP 1</b>\n\n<b>Mã:</b> {symbol}\n<b>Entry:</b> {entry_price}\n<b>SL:</b> {sl_order.get('id')}\n<b>TP:</b> {tp_order.get('id')}"
                         telegram_factory.send_tele(msg, cst.chat_id, True, True)
                         logger.info(f"✅ Cascade lớp 1 hoàn tất cho {symbol}")
                     else:
-                        logger.warning(f"⚠️ Cascade lớp 1 không hoàn toàn: SL={sl_order is not None}, TP={tp_order is not None}")
+                        logger.warning(f"⚠️ Cascade lớp 1 lỗi")
                         
                 except Exception as e:
                     logger.error(f"❌ Lỗi cascade lớp 1 cho {symbol}: {e}", exc_info=True)
@@ -329,7 +310,6 @@ def do_it():
                     telegram_factory.send_tele(msg, cst.chat_id, True, True)
 
         except Exception as e:
-            print(f"Lỗi position {symbol}: {e}", flush=True)
             logger.error(f"Lỗi xử lý position: {e}")
 
 while True:
