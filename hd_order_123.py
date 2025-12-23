@@ -183,53 +183,63 @@ def cancel_all_algo_orders_direct(symbol):
 
 def has_sl_tp_orders(symbol, exchange):
     """
-    [CRITICAL FIX] Tìm SL/TP ở cả Algo Orders VÀ Open Orders.
-    Khắc phục lỗi nhận diện sai khiến bot hủy đi tạo lại liên tục.
+    [LOGIC ĐÃ ĐƯỢC KIỂM CHỨNG]
+    Phân biệt SL và TP dựa trên 'callbackRate':
+    - TP (Trailing Stop): CONDITIONAL + callbackRate > 0
+    - SL (Stop Limit): CONDITIONAL + callbackRate = 0 (hoặc None)
     """
     try:
-        # 1. Lấy danh sách Algo (thường chứa Trailing Stop và đôi khi cả Stop Limit)
         algo_orders = get_algo_orders_for_symbol(symbol)
-        
-        # 2. Lấy danh sách Open Orders (thường chứa Stop Limit/Market)
         try: open_orders = exchange.fetch_open_orders(symbol)
         except: open_orders = []
             
         has_sl = False
         has_tp = False
         
-        # --- QUÉT TRONG ALGO ORDERS ---
+        # --- 1. QUÉT ALGO ORDERS (Chứa cả SL và TP dạng CONDITIONAL) ---
         active_algo_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
+        
         for order in active_algo_orders:
             algo_type = order.get('algoType', '').upper()
             reduce_only = order.get('reduceOnly', False)
             
-            # TP là Trailing Stop
-            if algo_type in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and reduce_only:
-                has_tp = True
+            # Lấy callbackRate để phân biệt
+            callback_rate = order.get('callbackRate')
             
-            # [QUAN TRỌNG] SL cũng có thể nằm ở đây (Stop Limit)
-            if algo_type in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LOSS_MARKET', 'STOP_LIMIT'] and reduce_only:
-                has_sl = True
-                # logger.info(f"Tim thay SL trong Algo: {algo_type}") # Debug
-        
-        # --- QUÉT TRONG OPEN ORDERS (Nếu chưa thấy) ---
+            # Xử lý giá trị callbackRate an toàn
+            callback_val = 0.0
+            if callback_rate is not None:
+                try:
+                    callback_val = float(callback_rate)
+                except:
+                    callback_val = 0.0
+
+            if reduce_only:
+                # == LOGIC NHẬN DIỆN TP (Trailing Stop) ==
+                # Loại CONDITIONAL hoặc VP, và CÓ callbackRate > 0
+                if algo_type in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and callback_val > 0:
+                    has_tp = True
+                    # logger.info(f"{symbol} -> Tìm thấy TP (Trailing): Rate={callback_val}")
+                
+                # == LOGIC NHẬN DIỆN SL (Stop Limit/Market) ==
+                # Loại 1: Các loại STOP rõ ràng
+                if algo_type in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LOSS_MARKET', 'STOP_LIMIT']:
+                    has_sl = True
+                    # logger.info(f"{symbol} -> Tìm thấy SL (Type chuẩn): {algo_type}")
+                    
+                # Loại 2: CONDITIONAL nhưng KHÔNG có callbackRate (chính là Stop Limit)
+                elif algo_type == 'CONDITIONAL' and callback_val == 0:
+                    has_sl = True
+                    # logger.info(f"{symbol} -> Tìm thấy SL (Type Conditional): Rate=0")
+
+        # --- 2. QUÉT OPEN ORDERS (Dự phòng cho SL thường) ---
         if not has_sl:
             for order in open_orders:
                 order_type = order.get('type', '').upper()
                 info = order.get('info', {})
                 reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
-                
                 if order_type in ['STOP', 'STOP_LIMIT', 'STOP_MARKET'] and reduce_only:
                     has_sl = True
-        
-        if not has_tp:
-             # Đề phòng TP nằm bên Open Orders (hiếm gặp với trailing nhưng cứ check)
-             for order in open_orders:
-                order_type = order.get('type', '').upper()
-                info = order.get('info', {})
-                reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
-                if order_type in ['TRAILING_STOP_MARKET'] and reduce_only:
-                    has_tp = True
 
         return has_sl, has_tp
         
@@ -240,7 +250,7 @@ def has_sl_tp_orders(symbol, exchange):
 # --- LOGIC CHÍNH ---
 
 def do_it():
-    logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Final Stable Mode) -------------------------")
+    logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Verified Mode) -------------------------")
     exchange_id = 'binance'
     exchange_class = getattr(ccxt, exchange_id)
     exchange = exchange_class({
@@ -285,7 +295,7 @@ def do_it():
                         exchange.cancel_all_orders(symbol_formatted)
                         cancel_all_algo_orders_direct(symbol_formatted)
                         
-                        msg = f"🛠 <b>AUTO-FIX</b>\n<b>Mã:</b> {symbol_formatted}\n<b>Trạng thái:</b> Đã Reset lệnh lỗi.\n<b>Chờ:</b> Tạo mới."
+                        msg = f"🛠 <b>AUTO-FIX</b>\n<b>Mã:</b> {symbol_formatted}\n<b>Trạng thái:</b> Lẻ lệnh -> Đã Reset.\n<b>Hành động:</b> Chờ tạo mới."
                         telegram_factory.send_tele(msg, cst.chat_id, True, True)
                     except Exception as e:
                         print(f"❌ Lỗi hủy lệnh: {e}", flush=True)
