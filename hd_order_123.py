@@ -144,17 +144,11 @@ def get_algo_orders_for_symbol(symbol):
         return []
 
 def cancel_all_algo_orders_direct(symbol):
-    """
-    [FIXED] Hủy từng Algo Order.
-    - Sửa lỗi so sánh code '200' vs 200.
-    - Thêm cảnh báo Telegram nếu hủy thất bại.
-    """
     try:
         active_orders = get_algo_orders_for_symbol(symbol)
         pending_orders = [o for o in active_orders if o.get('algoStatus') == 'NEW']
         
-        if not pending_orders:
-            return True
+        if not pending_orders: return True
             
         logger.info(f"Tìm thấy {len(pending_orders)} Algo Orders cần hủy cho {symbol}")
         
@@ -164,67 +158,81 @@ def cancel_all_algo_orders_direct(symbol):
         for order in pending_orders:
             algo_id = order.get('algoId')
             if algo_id:
-                params = {
-                    'symbol': symbol.replace('/', ''),
-                    'algoId': algo_id
-                }
+                params = {'symbol': symbol.replace('/', ''), 'algoId': algo_id}
                 response = call_binance_api_direct('DELETE', '/fapi/v1/algoOrder', params)
                 
-                # [FIX QUAN TRỌNG] Kiểm tra thành công an toàn hơn (chấp nhận cả int 200 và str '200')
                 is_success = False
                 if response:
                     code = response.get('code')
-                    # Nếu code là 200 hoặc '200' -> OK
-                    if str(code) == '200':
-                        is_success = True
+                    if str(code) == '200': is_success = True
                 
-                if is_success:
-                    count += 1
-                else:
-                    failed_orders.append(algo_id)
-                    logger.error(f"Lỗi hủy algoId {algo_id}: {response}")
+                if is_success: count += 1
+                else: failed_orders.append(algo_id)
 
         logger.info(f"Đã hủy thành công {count}/{len(pending_orders)} lệnh Algo cho {symbol}")
         
-        # [CẢNH BÁO TELEGRAM] Nếu có lệnh không hủy được
         if failed_orders:
-            msg = f"⚠️ <b>CẢNH BÁO KHẨN CẤP</b>\n\n<b>Mã:</b> {symbol}\n<b>Lỗi:</b> Không thể hủy {len(failed_orders)} lệnh Algo (Trailing Stop).\n<b>Hành động:</b> Vui lòng vào app Binance HỦY TAY ngay lập tức để tránh trùng lệnh!"
+            msg = f"⚠️ <b>CẢNH BÁO</b>\n\nKhông thể hủy {len(failed_orders)} lệnh Algo của {symbol}."
             telegram_factory.send_tele(msg, cst.chat_id, True, True)
-            return False # Báo thất bại để vòng lặp chính không tạo lệnh mới đè lên
+            return False 
 
         return True
-        
     except Exception as e:
-        logger.error(f"Lỗi ngoại lệ khi hủy Algo Orders cho {symbol}: {e}")
+        logger.error(f"Lỗi hủy Algo Orders {symbol}: {e}")
         return False
 
 def has_sl_tp_orders(symbol, exchange):
+    """
+    [CRITICAL FIX] Tìm SL/TP ở cả Algo Orders VÀ Open Orders.
+    Khắc phục lỗi nhận diện sai khiến bot hủy đi tạo lại liên tục.
+    """
     try:
+        # 1. Lấy danh sách Algo (thường chứa Trailing Stop và đôi khi cả Stop Limit)
         algo_orders = get_algo_orders_for_symbol(symbol)
+        
+        # 2. Lấy danh sách Open Orders (thường chứa Stop Limit/Market)
+        try: open_orders = exchange.fetch_open_orders(symbol)
+        except: open_orders = []
+            
         has_sl = False
         has_tp = False
         
-        # Check TP (Trailing Stop)
+        # --- QUÉT TRONG ALGO ORDERS ---
         active_algo_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
         for order in active_algo_orders:
             algo_type = order.get('algoType', '').upper()
             reduce_only = order.get('reduceOnly', False)
-            if algo_type in ['CONDITIONAL', 'VP'] and reduce_only:
+            
+            # TP là Trailing Stop
+            if algo_type in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and reduce_only:
                 has_tp = True
+            
+            # [QUAN TRỌNG] SL cũng có thể nằm ở đây (Stop Limit)
+            if algo_type in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LOSS_MARKET', 'STOP_LIMIT'] and reduce_only:
+                has_sl = True
+                # logger.info(f"Tim thay SL trong Algo: {algo_type}") # Debug
         
-        # Check SL (Stop Market/Limit)
-        try:
-            open_orders = exchange.fetch_open_orders(symbol)
+        # --- QUÉT TRONG OPEN ORDERS (Nếu chưa thấy) ---
+        if not has_sl:
             for order in open_orders:
                 order_type = order.get('type', '').upper()
                 info = order.get('info', {})
                 reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
-                if order_type in ['STOP', 'STOP_LIMIT'] and reduce_only:
+                
+                if order_type in ['STOP', 'STOP_LIMIT', 'STOP_MARKET'] and reduce_only:
                     has_sl = True
-        except Exception as e:
-            logger.warning(f"Không thể lấy open orders: {e}")
         
+        if not has_tp:
+             # Đề phòng TP nằm bên Open Orders (hiếm gặp với trailing nhưng cứ check)
+             for order in open_orders:
+                order_type = order.get('type', '').upper()
+                info = order.get('info', {})
+                reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
+                if order_type in ['TRAILING_STOP_MARKET'] and reduce_only:
+                    has_tp = True
+
         return has_sl, has_tp
+        
     except Exception as e:
         logger.error(f"Lỗi check SL/TP: {e}", exc_info=True)
         return False, False
@@ -232,7 +240,7 @@ def has_sl_tp_orders(symbol, exchange):
 # --- LOGIC CHÍNH ---
 
 def do_it():
-    logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Auto-Fix Mode) -------------------------")
+    logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Final Stable Mode) -------------------------")
     exchange_id = 'binance'
     exchange_class = getattr(ccxt, exchange_id)
     exchange = exchange_class({
@@ -265,32 +273,22 @@ def do_it():
                 
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
                 
+                # Logic xác định trạng thái
                 if has_sl and has_tp:
                     print(f"⏭️  {symbol_formatted} đã ĐỦ SL và TP. Bỏ qua.", flush=True)
                     continue
                 
                 elif has_sl or has_tp:
-                    # [FIXED] Tự động Fix lỗi lẻ lệnh TRIỆT ĐỂ
-                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). Đang làm mới lệnh cho {symbol_formatted}...", flush=True)
-                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Đang hủy lệnh chờ cũ của riêng {symbol_formatted}...")
-                    
+                    print(f"♻️  {symbol_formatted} bị LẺ LỆNH (SL={has_sl}, TP={has_tp}). Fix lỗi...", flush=True)
+                    logger.warning(f"{symbol_formatted} bị lẻ lệnh. Reset...")
                     try:
-                        # 1. Hủy lệnh thường (SL)
                         exchange.cancel_all_orders(symbol_formatted)
-                        # 2. Hủy lệnh Algo (TP - Trailing Stop) - Có check lỗi
-                        is_algo_cancelled = cancel_all_algo_orders_direct(symbol_formatted)
+                        cancel_all_algo_orders_direct(symbol_formatted)
                         
-                        if is_algo_cancelled:
-                            print(f"✅ Đã làm sạch lệnh của {symbol_formatted}. Chờ vòng sau tạo lại.", flush=True)
-                            msg = f"🛠 <b>TỰ ĐỘNG SỬA LỖI</b>\n\n<b>Mã:</b> {symbol_formatted}\n<b>Hành động:</b> Đã hủy lệnh chờ cũ.\n<b>Trạng thái:</b> Chờ tạo bộ SL/TP mới."
-                            telegram_factory.send_tele(msg, cst.chat_id, True, True)
-                        else:
-                            print(f"❌ Không thể hủy hết lệnh Algo của {symbol_formatted}. Dừng xử lý mã này.", flush=True)
-                        
+                        msg = f"🛠 <b>AUTO-FIX</b>\n<b>Mã:</b> {symbol_formatted}\n<b>Trạng thái:</b> Đã Reset lệnh lỗi.\n<b>Chờ:</b> Tạo mới."
+                        telegram_factory.send_tele(msg, cst.chat_id, True, True)
                     except Exception as e:
-                        print(f"❌ Lỗi khi hủy lệnh cũ {symbol_formatted}: {e}", flush=True)
-                        logger.error(f"Lỗi cancel_all {symbol_formatted}: {e}")
-                    
+                        print(f"❌ Lỗi hủy lệnh: {e}", flush=True)
                     continue 
                 
                 # --- TẠO LỆNH MỚI ---
