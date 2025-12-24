@@ -1,6 +1,6 @@
 """
 Binance Order Helper - Xử lý các loại lệnh với fallback an toàn
-Giải quyết lỗi API -4120 khi Binance thay đổi endpoint cho Trailing Stop
+Giải quyết lỗi API -4120 và lỗi mất ActivationPrice
 """
 
 import ccxt
@@ -44,42 +44,43 @@ class BinanceOrderHelper:
         reduce_only: bool = False
     ) -> Dict:
         """
-        Tạo lệnh Trailing Stop: Dùng DIRECT RAW API (/fapi/v1/order) để đảm bảo activationPrice không bị mất.
+        Tạo lệnh Trailing Stop: Sử dụng RAW API với tham số đã được chuẩn hóa String.
         """
         logger.info(f"Tạo Trailing Stop: {symbol} {side} {amount} @ {activation_price}, callback={callback_rate}%")
         
-        # [FIX FINAL]: Dùng fapiPrivatePostOrder (Endpoint chuẩn của Futures)
-        # Bỏ qua wrapper của CCXT để tự kiểm soát payload
         try:
-            # 1. Chuẩn bị Symbol (Bỏ dấu /)
+            # 1. CHUẨN HÓA DỮ LIỆU (QUAN TRỌNG NHẤT)
+            # Binance yêu cầu số lượng và giá phải là String đúng precision của từng cặp coin
+            # Nếu gửi float (vd: 409.00000001), Binance có thể từ chối hoặc lỗi
             market_id = symbol.replace('/', '')
             
-            # 2. Format giá về String chuẩn (tránh lỗi float)
-            str_activation_price = format(Decimal(str(activation_price)), 'f')
+            # Chuyển đổi sang string chuẩn theo quy định của sàn
+            qty_str = self.exchange.amount_to_precision(symbol, amount)
+            price_str = self.exchange.price_to_precision(symbol, activation_price)
+            callback_str = str(callback_rate) # '1.0'
             
-            # 3. Payload chuẩn của Binance Futures API cho Trailing Stop
-            # Tài liệu: https://binance-docs.github.io/apidocs/futures/en/#new-order-trade
+            # 2. Xây dựng Payload thủ công (Bỏ qua wrapper của CCXT để tránh lỗi map params)
             params = {
                 'symbol': market_id,
                 'side': side.upper(),
                 'type': 'TRAILING_STOP_MARKET',
-                'quantity': amount,
-                'activationPrice': str_activation_price, # QUAN TRỌNG NHẤT
-                'callbackRate': callback_rate,           # NUMBER (0.1 - 5.0)
-                'workingType': 'CONTRACT_PRICE'          # Kích hoạt theo giá đánh dấu hoặc giá gần nhất (thường là CONTRACT_PRICE)
+                'quantity': qty_str,           # Gửi String
+                'activationPrice': price_str,  # Gửi String (Bắt buộc để không bị lỗi bằng Entry)
+                'callbackRate': callback_str,  # Gửi String
+                'workingType': 'CONTRACT_PRICE' 
             }
             
             if reduce_only:
-                params['reduceOnly'] = 'true' # Raw API cần string 'true' hoặc boolean true tùy thư viện, gửi string cho chắc
+                params['reduceOnly'] = 'true'
             
             logger.info(f"🚀 [RAW API] Đang gửi lệnh: {params}")
             
-            # 4. Gửi lệnh trực tiếp bằng hàm raw của CCXT (bypass logic wrapper)
+            # 3. Gửi lệnh trực tiếp vào endpoint /fapi/v1/order
             response = self.exchange.fapiPrivatePostOrder(params)
             
             logger.info(f"✅ Tạo lệnh Trailing Stop thành công: Order ID {response.get('orderId')}")
             
-            # 5. Map lại thành format giống CCXT trả về để code khác không bị lỗi
+            # 4. Map lại format để code bên ngoài hiểu
             return {
                 'id': str(response.get('orderId')),
                 'info': response,
@@ -89,26 +90,23 @@ class BinanceOrderHelper:
             
         except Exception as e:
             logger.error(f"❌ [RAW API ERROR] Lỗi tạo Trailing Stop: {e}")
-            # Nếu Raw API lỗi thì thực sự bó tay, throw exception để bot biết
+            # Nếu cách Raw này mà lỗi thì do tài khoản/network, throw để bot biết đường dừng
             raise e
     
-    # --- Các hàm khác giữ nguyên nhưng thêm log ---
+    # --- CÁC HÀM KHÁC GIỮ NGUYÊN (Chỉ thêm chuẩn hóa log) ---
     
-    def create_stop_limit_order(
-        self,
-        symbol: str,
-        side: str,
-        amount: float,
-        stop_price: float,
-        limit_price: float,
-        reduce_only: bool = False
-    ) -> Dict:
-        logger.info(f"Tạo Stop Limit: {symbol} {side} {amount} @ stop={stop_price}, limit={limit_price}")
-        params = {'stopPrice': stop_price}
+    def create_stop_limit_order(self, symbol, side, amount, stop_price, limit_price, reduce_only=False):
+        logger.info(f"Tạo Stop Limit: {symbol} {side} {amount} @ stop={stop_price}")
+        params = {'stopPrice': self.exchange.price_to_precision(symbol, stop_price)}
         if reduce_only: params['reduceOnly'] = True
         
+        # Chuẩn hóa giá limit và amount
+        limit_str = self.exchange.price_to_precision(symbol, limit_price)
+        amount_str = self.exchange.amount_to_precision(symbol, amount)
+        
         try:
-            order = self.exchange.create_order(symbol, 'STOP', side, amount, limit_price, params)
+            # Dùng ccxt standard cho lệnh thường (vì nó ổn định với lệnh cơ bản)
+            order = self.exchange.create_order(symbol, 'STOP', side, amount_str, limit_str, params)
             logger.info(f"✅ Tạo lệnh Stop Limit thành công: Order ID {order.get('id')}")
             return order
         except Exception as e:
@@ -119,8 +117,12 @@ class BinanceOrderHelper:
         logger.info(f"Tạo Limit: {symbol} {side} {amount} @ {limit_price}")
         params = {}
         if reduce_only: params['reduceOnly'] = True
+        
+        limit_str = self.exchange.price_to_precision(symbol, limit_price)
+        amount_str = self.exchange.amount_to_precision(symbol, amount)
+        
         try:
-            order = self.exchange.create_order(symbol, 'LIMIT', side, amount, limit_price, params)
+            order = self.exchange.create_order(symbol, 'LIMIT', side, amount_str, limit_str, params)
             logger.info(f"✅ Tạo Limit thành công: {order.get('id')}")
             return order
         except Exception as e:
@@ -131,8 +133,11 @@ class BinanceOrderHelper:
         logger.info(f"Tạo Market: {symbol} {side} {amount}")
         params = {}
         if reduce_only: params['reduceOnly'] = True
+        
+        amount_str = self.exchange.amount_to_precision(symbol, amount)
+        
         try:
-            order = self.exchange.create_order(symbol, 'MARKET', side, amount, params)
+            order = self.exchange.create_order(symbol, 'MARKET', side, amount_str, params)
             logger.info(f"✅ Tạo Market thành công: {order.get('id')}")
             return order
         except Exception as e:
