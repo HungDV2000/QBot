@@ -10,8 +10,34 @@ from datetime import datetime
 import gg_sheet_factory
 import cst
 import binance_utils
+import os
+import sys
 
+# --- CẤU HÌNH LOGGING RA FILE RIÊNG ---
+# Tạo tên file log theo thời gian thực: cascade_manager_24_12_2025_18_30_00.txt
+current_time = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
+log_filename = f"cascade_manager_{current_time}.txt"
+
+# Cấu hình logger
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Tạo File Handler để ghi vào file
+file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+file_handler.setFormatter(formatter)
+
+# Thêm handler vào logger (tránh add nhiều lần nếu reload module)
+if not logger.handlers:
+    logger.addHandler(file_handler)
+else:
+    # Nếu đã có handler, kiểm tra xem có phải file handler chưa, nếu chưa thì add
+    has_file_handler = any(isinstance(h, logging.FileHandler) for h in logger.handlers)
+    if not has_file_handler:
+        logger.addHandler(file_handler)
+
+# In ra console để biết file log nằm ở đâu
+print(f"📝 Đã tạo file log chi tiết: {log_filename}", flush=True)
 
 
 class OrderState:
@@ -143,51 +169,48 @@ class CascadeManager:
         """Tạo lệnh Stop Loss (reduce only)"""
         is_long = (side == 'LONG')
         
-        # --- [LOG DEBUG TÍNH GIÁ SL] ---
-        print(f"\n📐 [DEBUG SL] Bắt đầu tính giá Stop Loss cho {symbol} ({side})", flush=True)
-        print(f"   - Entry Price: {entry_price}", flush=True)
-        print(f"   - Rate SL (lenh2_rate): {lenh2_rate}", flush=True)
+        # --- [LOG DEBUG CHI TIẾT VÀO FILE] ---
+        logger.info(f"--------------------------------------------------")
+        logger.info(f"📐 [TÍNH TOÁN STOP LOSS] {symbol} ({side})")
+        logger.info(f"   - Entry Price: {entry_price}")
+        logger.info(f"   - Tỷ lệ SL (lenh2_rate): {lenh2_rate}")
         
         # Tính stop price
-        # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
         if is_long:
-            # Entry - (Entry * Rate)
             stop_price_raw = entry_price * (1 - lenh2_rate)
             order_side = 'sell'
-            print(f"   - Công thức LONG: {entry_price} * (1 - {lenh2_rate}) = {stop_price_raw}", flush=True)
+            logger.info(f"   - Công thức LONG: {entry_price} * (1 - {lenh2_rate}) = {stop_price_raw}")
         else:
-            # Entry + (Entry * Rate)
             stop_price_raw = entry_price * (1 + lenh2_rate)
             order_side = 'buy'
-            print(f"   - Công thức SHORT: {entry_price} * (1 + {lenh2_rate}) = {stop_price_raw}", flush=True)
+            logger.info(f"   - Công thức SHORT: {entry_price} * (1 + {lenh2_rate}) = {stop_price_raw}")
         
         # Validate giá trước khi làm tròn
         if stop_price_raw <= 0:
+            logger.error(f"   ❌ Lỗi: Giá SL tính ra <= 0 ({stop_price_raw})")
             raise ValueError(f"Stop price tính được = {stop_price_raw} (phải > 0). Entry: {entry_price}, Rate: {lenh2_rate}")
         
-        # Sử dụng exchange.price_to_precision() để đảm bảo đúng format Binance
+        # Làm tròn
         try:
             stop_price_str = self.exchange.price_to_precision(symbol, stop_price_raw)
             stop_price = float(stop_price_str)
-            print(f"   - Giá sau làm tròn (Final SL): {stop_price}", flush=True)
+            logger.info(f"   - Giá sau làm tròn (Final SL): {stop_price}")
         except Exception as e:
-            # Fallback: dùng round với precision
             try:
                 precision = binance_utils.get_price_precision(symbol)
                 if precision is None or precision < 0:
-                    precision = 3  # Default precision
+                    precision = 3
                 stop_price = round(stop_price_raw, precision)
-                logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+                logger.warning(f"   ⚠️ Dùng round() fallback: {stop_price} (Lỗi: {e})")
             except Exception as e2:
                 raise ValueError(f"Không thể làm tròn stop_price cho {symbol}: {e2}")
         
-        # Validate giá sau khi làm tròn (có thể bị làm tròn thành 0)
         if stop_price <= 0:
             raise ValueError(f"Stop price sau khi làm tròn = {stop_price} (phải > 0). Giá gốc: {stop_price_raw}")
         
-        limit_price = stop_price  # Stop Limit
+        limit_price = stop_price
         
-        logger.info(f"Tạo SL {layer_num}{chr(97+1)}: {symbol} {order_side} @ {stop_price} (từ {stop_price_raw:.8f})")
+        logger.info(f"   -> Đang gửi lệnh STOP_LIMIT {order_side} giá {stop_price}")
         
         order = self.order_helper.create_stop_limit_order(
             symbol=symbol,
@@ -214,49 +237,46 @@ class CascadeManager:
         """Tạo lệnh Take Profit (reduce only, trailing stop)"""
         is_long = (side == 'LONG')
         
-        # --- [LOG DEBUG TÍNH GIÁ TP] ---
-        print(f"\n📐 [DEBUG TP] Bắt đầu tính giá Take Profit cho {symbol} ({side})", flush=True)
-        print(f"   - Entry Price: {entry_price}", flush=True)
-        print(f"   - Rate TP (lenh3_rate): {lenh3_rate}", flush=True)
+        # --- [LOG DEBUG CHI TIẾT VÀO FILE] ---
+        logger.info(f"--------------------------------------------------")
+        logger.info(f"📐 [TÍNH TOÁN TAKE PROFIT] {symbol} ({side})")
+        logger.info(f"   - Entry Price: {entry_price}")
+        logger.info(f"   - Tỷ lệ TP (lenh3_rate): {lenh3_rate}")
         
         # Tính activation price
-        # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
         if is_long:
-            # Entry + (Entry * Rate)
             activation_price_raw = entry_price * (1 + lenh3_rate)
             order_side = 'sell'
-            print(f"   - Công thức LONG: {entry_price} * (1 + {lenh3_rate}) = {activation_price_raw}", flush=True)
+            logger.info(f"   - Công thức LONG: {entry_price} * (1 + {lenh3_rate}) = {activation_price_raw}")
         else:
-            # Entry - (Entry * Rate)
             activation_price_raw = entry_price * (1 - lenh3_rate)
             order_side = 'buy'
-            print(f"   - Công thức SHORT: {entry_price} * (1 - {lenh3_rate}) = {activation_price_raw}", flush=True)
+            logger.info(f"   - Công thức SHORT: {entry_price} * (1 - {lenh3_rate}) = {activation_price_raw}")
         
-        # Validate giá trước khi làm tròn
+        # Validate
         if activation_price_raw <= 0:
+            logger.error(f"   ❌ Lỗi: Giá TP tính ra <= 0 ({activation_price_raw})")
             raise ValueError(f"Activation price tính được = {activation_price_raw} (phải > 0). Entry: {entry_price}, Rate: {lenh3_rate}")
         
-        # Sử dụng exchange.price_to_precision() để đảm bảo đúng format Binance
+        # Làm tròn
         try:
             activation_price_str = self.exchange.price_to_precision(symbol, activation_price_raw)
             activation_price = float(activation_price_str)
-            print(f"   - Giá sau làm tròn (Final TP Activation): {activation_price}", flush=True)
+            logger.info(f"   - Giá sau làm tròn (Final TP): {activation_price}")
         except Exception as e:
-            # Fallback: dùng round với precision
             try:
                 precision = binance_utils.get_price_precision(symbol)
                 if precision is None or precision < 0:
-                    precision = 3  # Default precision
+                    precision = 3
                 activation_price = round(activation_price_raw, precision)
-                logger.warning(f"Sử dụng round() fallback cho {symbol}: {e}")
+                logger.warning(f"   ⚠️ Dùng round() fallback: {activation_price} (Lỗi: {e})")
             except Exception as e2:
                 raise ValueError(f"Không thể làm tròn activation_price cho {symbol}: {e2}")
         
-        # Validate giá sau khi làm tròn (có thể bị làm tròn thành 0)
         if activation_price <= 0:
             raise ValueError(f"Activation price sau khi làm tròn = {activation_price} (phải > 0). Giá gốc: {activation_price_raw}")
         
-        logger.info(f"Tạo TP {layer_num}{chr(97+2)}: {symbol} {order_side} @ {activation_price} (từ {activation_price_raw:.8f}), callback={callback_rate}%")
+        logger.info(f"   -> Đang gửi lệnh TRAILING_STOP {order_side} giá {activation_price}, callback {callback_rate}%")
         
         order = self.order_helper.create_trailing_stop_order(
             symbol=symbol,
