@@ -28,20 +28,6 @@ class BinanceOrderHelper:
     ) -> Dict:
         """
         Tạo lệnh Trailing Stop với fallback sang Algo Order API nếu cần
-        
-        Args:
-            symbol: Cặp giao dịch (VD: 'BTC/USDT')
-            side: 'buy' hoặc 'sell'
-            amount: Số lượng
-            activation_price: Giá kích hoạt (BẮT BUỘC)
-            callback_rate: Tỷ lệ callback (%)
-            reduce_only: True nếu là lệnh reduce only
-            
-        Returns:
-            Dict: Thông tin lệnh đã tạo
-            
-        Raises:
-            Exception: Nếu cả 2 phương thức đều thất bại
         """
         logger.info(f"Tạo Trailing Stop: {symbol} {side} {amount} @ {activation_price}, callback={callback_rate}%")
         
@@ -58,14 +44,14 @@ class BinanceOrderHelper:
         try:
             logger.debug("Thử tạo lệnh bằng standard API...")
             
-            # [FIX QUAN TRỌNG]: Trailing Stop Market cần truyền activation_price vào tham số 'price'
-            # Nếu để price=None, Binance sẽ lấy giá hiện tại làm giá kích hoạt -> Lỗi TP sát Entry
+            # [FIX QUAN TRỌNG]: PHẢI TRUYỀN activation_price VÀO THAM SỐ price
+            # Nếu để price=None, Binance sẽ lấy giá hiện tại (Entry) làm giá kích hoạt
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='TRAILING_STOP_MARKET',
                 side=side,
                 amount=amount,
-                price=activation_price, # <--- ĐÃ SỬA: Truyền giá kích hoạt vào đây
+                price=activation_price,  # <--- ĐÃ SỬA: Thay None bằng activation_price
                 params=params
             )
             logger.info(f"✅ Tạo lệnh Trailing Stop thành công (standard API): Order ID {order.get('id')}")
@@ -105,9 +91,6 @@ class BinanceOrderHelper:
     ) -> Dict:
         """
         Tạo lệnh Trailing Stop qua Algo Order API (Binance mới)
-        
-        Returns:
-            Dict: Response từ Binance Algo Order API
         """
         # Chuẩn bị symbol cho Binance API (loại bỏ '/')
         binance_symbol = symbol.replace('/', '')
@@ -151,9 +134,7 @@ class BinanceOrderHelper:
         limit_price: float,
         reduce_only: bool = False
     ) -> Dict:
-        """
-        Tạo lệnh Stop Limit
-        """
+        """Tạo lệnh Stop Limit"""
         logger.info(f"Tạo Stop Limit: {symbol} {side} {amount} @ stop={stop_price}, limit={limit_price}")
         
         params = {
@@ -187,9 +168,7 @@ class BinanceOrderHelper:
         limit_price: float,
         reduce_only: bool = False
     ) -> Dict:
-        """
-        Tạo lệnh Limit
-        """
+        """Tạo lệnh Limit"""
         logger.info(f"Tạo Limit: {symbol} {side} {amount} @ {limit_price}")
         
         params = {}
@@ -219,9 +198,7 @@ class BinanceOrderHelper:
         amount: float,
         reduce_only: bool = False
     ) -> Dict:
-        """
-        Tạo lệnh Market
-        """
+        """Tạo lệnh Market"""
         logger.info(f"Tạo Market: {symbol} {side} {amount}")
         
         params = {}
@@ -250,9 +227,7 @@ def cancel_all_open_orders_with_retry(
     max_retries: int = 3,
     delay: int = 2
 ) -> Tuple[bool, int]:
-    """
-    Hủy tất cả lệnh chờ với retry mechanism
-    """
+    """Hủy tất cả lệnh chờ với retry mechanism"""
     import time
     
     logger.info(f"Bắt đầu hủy tất cả lệnh chờ cho {symbol}...")
@@ -290,17 +265,11 @@ def cancel_all_open_orders_with_retry(
             else:
                 logger.warning(f"⚠️ Còn {len(remaining_orders)} lệnh sót sau lần {attempt + 1}")
                 
-                # Nếu đây là lần cuối, log chi tiết
-                if attempt == max_retries - 1:
-                    for order in remaining_orders:
-                        logger.error(f"Lệnh sót: ID={order['id']}, Type={order.get('type')}, Side={order.get('side')}")
-                
         except Exception as e:
             logger.error(f"❌ Lỗi khi hủy lệnh (lần {attempt + 1}): {e}")
             if attempt == max_retries - 1:
-                return False, -1  # -1 nghĩa là không biết số lệnh còn lại
+                return False, -1 
     
-    # Sau max_retries vẫn còn lệnh sót
     try:
         remaining = exchange.fetch_open_orders(symbol)
         logger.critical(f"🔴 NGHIÊM TRỌNG: Không thể xóa {len(remaining)} lệnh cho {symbol} sau {max_retries} lần thử!")
@@ -313,9 +282,6 @@ def cancel_all_open_orders_with_retry(
 _helper_instance = None
 
 def get_order_helper(exchange: ccxt.binance) -> BinanceOrderHelper:
-    """
-    Get singleton instance của BinanceOrderHelper
-    """
     global _helper_instance
     if _helper_instance is None:
         _helper_instance = BinanceOrderHelper(exchange)
