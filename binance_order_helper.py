@@ -33,7 +33,7 @@ class BinanceOrderHelper:
             symbol: Cặp giao dịch (VD: 'BTC/USDT')
             side: 'buy' hoặc 'sell'
             amount: Số lượng
-            activation_price: Giá kích hoạt
+            activation_price: Giá kích hoạt (BẮT BUỘC)
             callback_rate: Tỷ lệ callback (%)
             reduce_only: True nếu là lệnh reduce only
             
@@ -57,12 +57,15 @@ class BinanceOrderHelper:
         # Thử phương thức 1: Standard API (ccxt)
         try:
             logger.debug("Thử tạo lệnh bằng standard API...")
+            
+            # [FIX QUAN TRỌNG]: Trailing Stop Market cần truyền activation_price vào tham số 'price'
+            # Nếu để price=None, Binance sẽ lấy giá hiện tại làm giá kích hoạt -> Lỗi TP sát Entry
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='TRAILING_STOP_MARKET',
                 side=side,
                 amount=amount,
-                price=None,
+                price=activation_price, # <--- ĐÃ SỬA: Truyền giá kích hoạt vào đây
                 params=params
             )
             logger.info(f"✅ Tạo lệnh Trailing Stop thành công (standard API): Order ID {order.get('id')}")
@@ -150,17 +153,6 @@ class BinanceOrderHelper:
     ) -> Dict:
         """
         Tạo lệnh Stop Limit
-        
-        Args:
-            symbol: Cặp giao dịch
-            side: 'buy' hoặc 'sell'
-            amount: Số lượng
-            stop_price: Giá stop
-            limit_price: Giá limit
-            reduce_only: True nếu là lệnh reduce only
-            
-        Returns:
-            Dict: Thông tin lệnh đã tạo
         """
         logger.info(f"Tạo Stop Limit: {symbol} {side} {amount} @ stop={stop_price}, limit={limit_price}")
         
@@ -197,16 +189,6 @@ class BinanceOrderHelper:
     ) -> Dict:
         """
         Tạo lệnh Limit
-        
-        Args:
-            symbol: Cặp giao dịch
-            side: 'buy' hoặc 'sell'
-            amount: Số lượng
-            limit_price: Giá limit
-            reduce_only: True nếu là lệnh reduce only
-            
-        Returns:
-            Dict: Thông tin lệnh đã tạo
         """
         logger.info(f"Tạo Limit: {symbol} {side} {amount} @ {limit_price}")
         
@@ -239,15 +221,6 @@ class BinanceOrderHelper:
     ) -> Dict:
         """
         Tạo lệnh Market
-        
-        Args:
-            symbol: Cặp giao dịch
-            side: 'buy' hoặc 'sell'
-            amount: Số lượng
-            reduce_only: True nếu là lệnh reduce only
-            
-        Returns:
-            Dict: Thông tin lệnh đã tạo
         """
         logger.info(f"Tạo Market: {symbol} {side} {amount}")
         
@@ -279,15 +252,6 @@ def cancel_all_open_orders_with_retry(
 ) -> Tuple[bool, int]:
     """
     Hủy tất cả lệnh chờ với retry mechanism
-    
-    Args:
-        exchange: CCXT exchange instance
-        symbol: Symbol để hủy lệnh
-        max_retries: Số lần retry tối đa
-        delay: Delay giữa các lần retry (giây)
-        
-    Returns:
-        Tuple[success, remaining_orders]: (True/False, số lệnh còn sót)
     """
     import time
     
@@ -345,7 +309,7 @@ def cancel_all_open_orders_with_retry(
         return False, -1
 
 
-# Singleton instance (tùy chọn)
+# Singleton instance
 _helper_instance = None
 
 def get_order_helper(exchange: ccxt.binance) -> BinanceOrderHelper:
@@ -356,4 +320,3 @@ def get_order_helper(exchange: ccxt.binance) -> BinanceOrderHelper:
     if _helper_instance is None:
         _helper_instance = BinanceOrderHelper(exchange)
     return _helper_instance
-
