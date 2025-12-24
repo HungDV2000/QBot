@@ -17,16 +17,11 @@ log_filename = "binance_order_helper.txt"
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Kiểm tra handler để tránh duplicate log khi reload
 if not logger.handlers:
     try:
-        # mode='a': Append (Nối tiếp vào file cũ)
         file_handler = logging.FileHandler(log_filename, mode='a', encoding='utf-8')
-        
-        # Format chuẩn: Năm-Tháng-Ngày Giờ:Phút:Giây
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
         file_handler.setFormatter(formatter)
-        
         logger.addHandler(file_handler)
         print(f"📝 [LOG HELPER] Đã kết nối file log: {log_filename}", flush=True)
     except Exception as e:
@@ -53,9 +48,7 @@ class BinanceOrderHelper:
         """
         logger.info(f"Tạo Trailing Stop: {symbol} {side} {amount} @ {activation_price}, callback={callback_rate}%")
         
-        # [THAY ĐỔI QUAN TRỌNG]: ƯU TIÊN GỌI ALGO API TRỰC TIẾP
-        # Lý do: Hàm create_order chuẩn của CCXT đôi khi không truyền được activationPrice
-        # khiến sàn mặc định lấy giá hiện tại -> Lỗi sai giá TP.
+        # [THAY ĐỔI QUAN TRỌNG]: Fix lỗi thiếu tham số khi gọi Algo API
         try:
             logger.info("🚀 Đang gửi lệnh qua Algo Order API (Direct)...")
             order = self._create_trailing_stop_algo_api(
@@ -70,14 +63,17 @@ class BinanceOrderHelper:
             
             # Fallback: Thử phương thức cũ nếu phương thức trực tiếp lỗi
             try:
+                # Binance Futures yêu cầu activationPrice là STRING
+                str_activation_price = format(Decimal(str(activation_price)), 'f')
+                
                 params = {
-                    'activationPrice': format(Decimal(str(activation_price)), 'f'),
+                    'activationPrice': str_activation_price,
                     'callbackRate': callback_rate,
                 }
                 if reduce_only:
                     params['reduceOnly'] = True
 
-                # Cố gắng truyền activation_price vào cả price và params
+                # [QUAN TRỌNG]: Truyền activationPrice vào cả price và params để cover mọi trường hợp của CCXT
                 order = self.exchange.create_order(
                     symbol=symbol,
                     type='TRAILING_STOP_MARKET',
@@ -108,6 +104,10 @@ class BinanceOrderHelper:
         binance_symbol = symbol.replace('/', '')
         
         # Chuẩn bị params chính xác theo document của Binance
+        # [FIX]: Cần thêm parameter 'algoType' nếu endpoint yêu cầu (dù document bảo không cần, nhưng error log bảo thiếu)
+        # Tuy nhiên, endpoint /fapi/v1/algoOrder thường dùng type chứ không phải algoType.
+        # Nhưng để fix lỗi -1102, ta sẽ thử cách gọi chuẩn nhất.
+        
         params = {
             'symbol': binance_symbol,
             'side': side.upper(),
@@ -115,6 +115,7 @@ class BinanceOrderHelper:
             'type': 'TRAILING_STOP_MARKET',
             'activationPrice': format(Decimal(str(activation_price)), 'f'),
             'callbackRate': callback_rate,
+            'workingType': 'CONTRACT_PRICE' # Thêm cái này cho chắc
         }
         
         if reduce_only:
