@@ -49,58 +49,48 @@ class BinanceOrderHelper:
         reduce_only: bool = False
     ) -> Dict:
         """
-        Tạo lệnh Trailing Stop với fallback sang Algo Order API nếu cần
+        Tạo lệnh Trailing Stop: Ưu tiên dùng Algo Order API trực tiếp để đảm bảo giá Activation chuẩn.
         """
         logger.info(f"Tạo Trailing Stop: {symbol} {side} {amount} @ {activation_price}, callback={callback_rate}%")
         
-        # Chuẩn bị params
-        params = {
-            'activationPrice': format(Decimal(str(activation_price)), 'f'),
-            'callbackRate': callback_rate,
-        }
-        
-        if reduce_only:
-            params['reduceOnly'] = True
-        
-        # Thử phương thức 1: Standard API (ccxt)
+        # [THAY ĐỔI QUAN TRỌNG]: ƯU TIÊN GỌI ALGO API TRỰC TIẾP
+        # Lý do: Hàm create_order chuẩn của CCXT đôi khi không truyền được activationPrice
+        # khiến sàn mặc định lấy giá hiện tại -> Lỗi sai giá TP.
         try:
-            logger.debug("Thử tạo lệnh bằng standard API...")
-            
-            # [FIX QUAN TRỌNG]: PHẢI TRUYỀN activation_price VÀO THAM SỐ price
-            # Nếu để price=None, Binance sẽ lấy giá hiện tại (Entry) làm giá kích hoạt
-            order = self.exchange.create_order(
-                symbol=symbol,
-                type='TRAILING_STOP_MARKET',
-                side=side,
-                amount=amount,
-                price=activation_price,  # <--- FIX: Truyền giá kích hoạt vào đây
-                params=params
+            logger.info("🚀 Đang gửi lệnh qua Algo Order API (Direct)...")
+            order = self._create_trailing_stop_algo_api(
+                symbol, side, amount, activation_price, callback_rate, reduce_only
             )
-            logger.info(f"✅ Tạo lệnh Trailing Stop thành công (standard API): Order ID {order.get('id')}")
+            logger.info(f"✅ Tạo lệnh Trailing Stop thành công (Direct API): ClientID {order.get('id')}")
             return order
             
-        except ccxt.ExchangeError as e:
-            error_str = str(e)
+        except Exception as e_algo:
+            logger.error(f"❌ Algo API thất bại: {e_algo}")
+            logger.warning("⚠️ Đang thử fallback sang Standard API (CCXT)...")
             
-            # Kiểm tra có phải lỗi -4120 không
-            if '-4120' in error_str or 'Algo Order API' in error_str:
-                logger.warning(f"⚠️ Lỗi -4120 phát hiện, chuyển sang Algo Order API...")
-                
-                # Thử phương thức 2: Algo Order API
-                try:
-                    order = self._create_trailing_stop_algo_api(
-                        symbol, side, amount, activation_price, callback_rate, reduce_only
-                    )
-                    logger.info(f"✅ Tạo lệnh Trailing Stop thành công (Algo API): Order ID {order.get('orderId')}")
-                    return order
-                    
-                except Exception as e2:
-                    logger.error(f"❌ Algo Order API cũng thất bại: {e2}")
-                    raise Exception(f"Không thể tạo lệnh Trailing Stop: Standard API failed (-4120), Algo API failed: {e2}")
-            else:
-                # Lỗi khác, không phải -4120
-                logger.error(f"❌ Lỗi khi tạo lệnh Trailing Stop: {e}")
-                raise e
+            # Fallback: Thử phương thức cũ nếu phương thức trực tiếp lỗi
+            try:
+                params = {
+                    'activationPrice': format(Decimal(str(activation_price)), 'f'),
+                    'callbackRate': callback_rate,
+                }
+                if reduce_only:
+                    params['reduceOnly'] = True
+
+                # Cố gắng truyền activation_price vào cả price và params
+                order = self.exchange.create_order(
+                    symbol=symbol,
+                    type='TRAILING_STOP_MARKET',
+                    side=side,
+                    amount=amount,
+                    price=activation_price, 
+                    params=params
+                )
+                logger.info(f"✅ Tạo lệnh Trailing Stop thành công (Fallback CCXT): Order ID {order.get('id')}")
+                return order
+            except Exception as e_std:
+                logger.error(f"❌ Cả 2 phương thức đều thất bại. Lỗi CCXT: {e_std}")
+                raise e_std
     
     def _create_trailing_stop_algo_api(
         self,
@@ -117,7 +107,7 @@ class BinanceOrderHelper:
         # Chuẩn bị symbol cho Binance API (loại bỏ '/')
         binance_symbol = symbol.replace('/', '')
         
-        # Chuẩn bị params cho Algo Order API
+        # Chuẩn bị params chính xác theo document của Binance
         params = {
             'symbol': binance_symbol,
             'side': side.upper(),
@@ -130,7 +120,7 @@ class BinanceOrderHelper:
         if reduce_only:
             params['reduceOnly'] = 'true'
         
-        logger.debug(f"Algo Order API params: {params}")
+        logger.info(f"📤 Payload gửi đi: {params}")
         
         # Gọi Algo Order API
         response = self.exchange.fapiPrivatePostAlgoOrder(params)
@@ -287,17 +277,11 @@ def cancel_all_open_orders_with_retry(
             else:
                 logger.warning(f"⚠️ Còn {len(remaining_orders)} lệnh sót sau lần {attempt + 1}")
                 
-                # Nếu đây là lần cuối, log chi tiết
-                if attempt == max_retries - 1:
-                    for order in remaining_orders:
-                        logger.error(f"Lệnh sót: ID={order['id']}, Type={order.get('type')}, Side={order.get('side')}")
-                
         except Exception as e:
             logger.error(f"❌ Lỗi khi hủy lệnh (lần {attempt + 1}): {e}")
             if attempt == max_retries - 1:
                 return False, -1 
     
-    # Sau max_retries vẫn còn lệnh sót
     try:
         remaining = exchange.fetch_open_orders(symbol)
         logger.critical(f"🔴 NGHIÊM TRỌNG: Không thể xóa {len(remaining)} lệnh cho {symbol} sau {max_retries} lần thử!")
@@ -310,7 +294,6 @@ def cancel_all_open_orders_with_retry(
 _helper_instance = None
 
 def get_order_helper(exchange: ccxt.binance) -> BinanceOrderHelper:
-    """Get singleton instance"""
     global _helper_instance
     if _helper_instance is None:
         _helper_instance = BinanceOrderHelper(exchange)
