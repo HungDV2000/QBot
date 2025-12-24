@@ -7,8 +7,30 @@ import ccxt
 import logging
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
+import os
+import sys
+from datetime import datetime
+
+# --- CẤU HÌNH LOGGING RA FILE binance_order_helper.txt ---
+log_filename = "binance_order_helper.txt"
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Kiểm tra handler để tránh duplicate log khi reload
+if not logger.handlers:
+    try:
+        # mode='a': Append (Nối tiếp vào file cũ)
+        file_handler = logging.FileHandler(log_filename, mode='a', encoding='utf-8')
+        
+        # Format chuẩn: Năm-Tháng-Ngày Giờ:Phút:Giây
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+        
+        logger.addHandler(file_handler)
+        print(f"📝 [LOG HELPER] Đã kết nối file log: {log_filename}", flush=True)
+    except Exception as e:
+        print(f"⚠️ [LOG ERROR] Không thể mở file log helper: {e}", flush=True)
 
 
 class BinanceOrderHelper:
@@ -51,7 +73,7 @@ class BinanceOrderHelper:
                 type='TRAILING_STOP_MARKET',
                 side=side,
                 amount=amount,
-                price=activation_price,  # <--- ĐÃ SỬA: Thay None bằng activation_price
+                price=activation_price,  # <--- FIX: Truyền giá kích hoạt vào đây
                 params=params
             )
             logger.info(f"✅ Tạo lệnh Trailing Stop thành công (standard API): Order ID {order.get('id')}")
@@ -265,11 +287,17 @@ def cancel_all_open_orders_with_retry(
             else:
                 logger.warning(f"⚠️ Còn {len(remaining_orders)} lệnh sót sau lần {attempt + 1}")
                 
+                # Nếu đây là lần cuối, log chi tiết
+                if attempt == max_retries - 1:
+                    for order in remaining_orders:
+                        logger.error(f"Lệnh sót: ID={order['id']}, Type={order.get('type')}, Side={order.get('side')}")
+                
         except Exception as e:
             logger.error(f"❌ Lỗi khi hủy lệnh (lần {attempt + 1}): {e}")
             if attempt == max_retries - 1:
                 return False, -1 
     
+    # Sau max_retries vẫn còn lệnh sót
     try:
         remaining = exchange.fetch_open_orders(symbol)
         logger.critical(f"🔴 NGHIÊM TRỌNG: Không thể xóa {len(remaining)} lệnh cho {symbol} sau {max_retries} lần thử!")
@@ -282,6 +310,7 @@ def cancel_all_open_orders_with_retry(
 _helper_instance = None
 
 def get_order_helper(exchange: ccxt.binance) -> BinanceOrderHelper:
+    """Get singleton instance"""
     global _helper_instance
     if _helper_instance is None:
         _helper_instance = BinanceOrderHelper(exchange)
