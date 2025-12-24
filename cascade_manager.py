@@ -13,31 +13,28 @@ import binance_utils
 import os
 import sys
 
-# --- CẤU HÌNH LOGGING RA FILE RIÊNG ---
-# Tạo tên file log theo thời gian thực: cascade_manager_24_12_2025_18_30_00.txt
-current_time = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
-log_filename = f"cascade_manager_{current_time}.txt"
+# --- CẤU HÌNH LOGGING (GHI VÀO 1 FILE DUY NHẤT) ---
+log_filename = "cascade_manager.txt"
 
 # Cấu hình logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Tạo File Handler để ghi vào file
-file_handler = logging.FileHandler(log_filename, encoding='utf-8')
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-file_handler.setFormatter(formatter)
-
-# Thêm handler vào logger (tránh add nhiều lần nếu reload module)
+# Kiểm tra handler để tránh duplicate log khi reload
 if not logger.handlers:
-    logger.addHandler(file_handler)
-else:
-    # Nếu đã có handler, kiểm tra xem có phải file handler chưa, nếu chưa thì add
-    has_file_handler = any(isinstance(h, logging.FileHandler) for h in logger.handlers)
-    if not has_file_handler:
+    try:
+        # mode='a': Append (Nối tiếp vào file cũ, không xóa log cũ)
+        # encoding='utf-8': Hỗ trợ tiếng Việt
+        file_handler = logging.FileHandler(log_filename, mode='a', encoding='utf-8')
+        
+        # Format: Năm-Tháng-Ngày Giờ:Phút:Giây - Mức độ - Nội dung
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        file_handler.setFormatter(formatter)
+        
         logger.addHandler(file_handler)
-
-# In ra console để biết file log nằm ở đâu
-print(f"📝 Đã tạo file log chi tiết: {log_filename}", flush=True)
+        print(f"📝 [LOG] Đã kết nối file log: {log_filename}", flush=True)
+    except Exception as e:
+        print(f"⚠️ [LOG ERROR] Không thể mở file log: {e}", flush=True)
 
 
 class OrderState:
@@ -97,9 +94,6 @@ class CascadeManager:
         """
         Xử lý khi lệnh entry (1a, 2a, 3a...) được khớp
         Tự động tạo SL + TP + Entry lớp tiếp theo
-        
-        Returns:
-            Dict với keys: 'sl_order', 'tp_order', 'next_entry_order'
         """
         logger.info(f"🎯 Entry lớp {layer_num} đã khớp: {symbol} @ {entry_price}")
         
@@ -362,9 +356,6 @@ class CascadeManager:
         """
         Xử lý khi Take Profit khớp
         Hủy SL cùng lớp + Entry lớp tiếp theo
-        
-        Returns:
-            List các Order IDs đã hủy
         """
         logger.info(f"💰 TP lớp {layer_num} đã khớp: {symbol}")
         
@@ -399,9 +390,6 @@ class CascadeManager:
         """
         Xử lý khi Stop Loss khớp
         Hủy TP cùng lớp, KHÔNG hủy Entry lớp tiếp theo
-        
-        Returns:
-            List các Order IDs đã hủy
         """
         logger.info(f"🛑 SL lớp {layer_num} đã khớp: {symbol}")
         

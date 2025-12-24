@@ -67,12 +67,19 @@ def is_same_pair(sym1, sym2):
     return False
 
 def getLenh23Rate(symbol, state):
+    """
+    Lấy tỷ lệ SL/TP từ Google Sheet.
+    Có Log chi tiết để debug lỗi đọc số 0.
+    """
     if state == STATE_LONG:
         start_row = 55
         end_row = 104
+        logger.info(f"🔍 [GET RATE] Đang tìm Rate LONG cho {symbol}...")
     elif state == STATE_SHORT:
         start_row = 4
         end_row = 53
+        logger.info(f"🔍 [GET RATE] Đang tìm Rate SHORT cho {symbol}...")
+    
     try:
         sheet_dat_lenh = gg_sheet_factory.get_dat_lenh(f"A{start_row}:G{end_row}")
         for d in sheet_dat_lenh:
@@ -81,28 +88,42 @@ def getLenh23Rate(symbol, state):
                 if len(d) < 7: continue
                 sym = d[0]
                 if not sym: continue
-
-                val_sl = d[5].strip() if d[5] else ""
-                val_tp = d[6].strip() if d[6] else ""
                 
-                if not val_sl or not val_tp:
-                    continue
+                # Chỉ xử lý nếu khớp Symbol
+                if is_same_pair(symbol, sym):
+                    val_sl = d[5].strip() if d[5] else ""
+                    val_tp = d[6].strip() if d[6] else ""
                     
-                lenh2_rate = float(val_sl)
-                lenh3_rate = float(val_tp)
-                
-                # [FIX]: Nếu Rate <= 0 (do nhập nhầm số 0 trên sheet), bỏ qua để lấy mặc định
-                if lenh2_rate <= 0 or lenh3_rate <= 0:
-                    continue
-                
-                if(is_same_pair(symbol, sym)):
+                    logger.info(f"   -> Tìm thấy trong Sheet: {d}")
+                    logger.info(f"   -> Raw Values: SL='{val_sl}', TP='{val_tp}'")
+                    
+                    if not val_sl or not val_tp:
+                        logger.warning(f"   ⚠️ Dữ liệu rỗng. Bỏ qua.")
+                        continue
+                        
+                    lenh2_rate = float(val_sl)
+                    lenh3_rate = float(val_tp)
+                    
+                    logger.info(f"   -> Parsed Float: SL={lenh2_rate}, TP={lenh3_rate}")
+                    
+                    # [FIX QUAN TRỌNG]: Nếu đọc được số 0, BỎ QUA NGAY để dùng fallback
+                    if lenh2_rate <= 0 or lenh3_rate <= 0:
+                        logger.warning(f"   ⛔ Rate <= 0 (Lỗi nhập liệu). Bỏ qua Sheet để dùng Config mặc định.")
+                        continue
+                    
+                    logger.info(f"   ✅ Dùng Rate từ Sheet: {lenh2_rate} / {lenh3_rate}")
                     return symbol, lenh2_rate, lenh3_rate
+                    
             except ValueError: continue 
-            except Exception: pass
+            except Exception as e:
+                logger.error(f"Lỗi parse dòng sheet: {e}")
+                
     except Exception as e:
         logger.error(f"Lỗi đọc Google Sheet: {e}")
 
-    # Fallback về Config mặc định (30% và 60%)
+    # Fallback về Config mặc định
+    logger.info(f"   ⬇️ Không tìm thấy hoặc lỗi Sheet. Dùng Default Config: SL={cst.lenh2_rate_long if state == STATE_LONG else cst.lenh2_rate_short}, TP={cst.lenh3_rate_long if state == STATE_LONG else cst.lenh3_rate_short}")
+    
     if state == STATE_LONG:
         return symbol, cst.lenh2_rate_long, cst.lenh3_rate_long
     elif state == STATE_SHORT:
@@ -194,6 +215,11 @@ def cancel_all_algo_orders_direct(symbol):
         return False
 
 def has_sl_tp_orders(symbol, exchange):
+    """
+    [SMART CHECK] Phân biệt SL và TP khi cả 2 đều là 'CONDITIONAL'.
+    - TP: Bắt buộc phải có callbackRate > 0.
+    - SL: callbackRate bằng 0 hoặc không có.
+    """
     try:
         algo_orders = get_algo_orders_for_symbol(symbol)
         try: open_orders = exchange.fetch_open_orders(symbol)
@@ -209,18 +235,23 @@ def has_sl_tp_orders(symbol, exchange):
             algo_type = order.get('algoType', '').upper()
             reduce_only = order.get('reduceOnly', False)
             
+            # Lấy callbackRate để phân biệt
             callback_rate = order.get('callbackRate')
+            
+            # Xử lý giá trị callbackRate an toàn
             callback_val = 0.0
             if callback_rate is not None:
-                try: callback_val = float(callback_rate)
-                except: callback_val = 0.0
+                try:
+                    callback_val = float(callback_rate)
+                except:
+                    callback_val = 0.0
 
             if reduce_only:
-                # TP (Trailing Stop): Rate > 0
+                # == KIỂM TRA TP (Trailing Stop) ==
                 if algo_type in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and callback_val > 0:
                     has_tp = True
                 
-                # SL (Stop Limit): Rate = 0
+                # == KIỂM TRA SL (Stop Limit/Market) ==
                 if algo_type in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LOSS_MARKET', 'STOP_LIMIT']:
                     has_sl = True
                 elif algo_type == 'CONDITIONAL' and callback_val == 0:
@@ -234,7 +265,7 @@ def has_sl_tp_orders(symbol, exchange):
                 reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
                 if order_type in ['STOP', 'STOP_LIMIT', 'STOP_MARKET'] and reduce_only:
                     has_sl = True
-        
+
         return has_sl, has_tp
         
     except Exception as e:
@@ -277,6 +308,7 @@ def do_it():
                 
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
                 
+                # Logic xác định trạng thái
                 if has_sl and has_tp:
                     print(f"⏭️  {symbol_formatted} đã ĐỦ SL và TP. Bỏ qua.", flush=True)
                     continue
@@ -313,7 +345,7 @@ def do_it():
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
                 
-                # Lấy Rate (đã fix lỗi nhận số 0)
+                # Lấy Rate (đã thêm Log chi tiết)
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
 
                 if entry_price <= 0 or lenh2rate <= 0 or lenh3rate <= 0:
