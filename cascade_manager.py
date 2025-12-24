@@ -143,15 +143,23 @@ class CascadeManager:
         """Tạo lệnh Stop Loss (reduce only)"""
         is_long = (side == 'LONG')
         
+        # --- [LOG DEBUG TÍNH GIÁ SL] ---
+        print(f"\n📐 [DEBUG SL] Bắt đầu tính giá Stop Loss cho {symbol} ({side})", flush=True)
+        print(f"   - Entry Price: {entry_price}", flush=True)
+        print(f"   - Rate SL (lenh2_rate): {lenh2_rate}", flush=True)
+        
         # Tính stop price
         # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
-        # Ví dụ: lenh2_rate=0.3 → SL kích hoạt khi giá thay đổi 30% (không phải 3% khi leverage=10x)
         if is_long:
+            # Entry - (Entry * Rate)
             stop_price_raw = entry_price * (1 - lenh2_rate)
             order_side = 'sell'
+            print(f"   - Công thức LONG: {entry_price} * (1 - {lenh2_rate}) = {stop_price_raw}", flush=True)
         else:
+            # Entry + (Entry * Rate)
             stop_price_raw = entry_price * (1 + lenh2_rate)
             order_side = 'buy'
+            print(f"   - Công thức SHORT: {entry_price} * (1 + {lenh2_rate}) = {stop_price_raw}", flush=True)
         
         # Validate giá trước khi làm tròn
         if stop_price_raw <= 0:
@@ -161,6 +169,7 @@ class CascadeManager:
         try:
             stop_price_str = self.exchange.price_to_precision(symbol, stop_price_raw)
             stop_price = float(stop_price_str)
+            print(f"   - Giá sau làm tròn (Final SL): {stop_price}", flush=True)
         except Exception as e:
             # Fallback: dùng round với precision
             try:
@@ -205,15 +214,23 @@ class CascadeManager:
         """Tạo lệnh Take Profit (reduce only, trailing stop)"""
         is_long = (side == 'LONG')
         
+        # --- [LOG DEBUG TÍNH GIÁ TP] ---
+        print(f"\n📐 [DEBUG TP] Bắt đầu tính giá Take Profit cho {symbol} ({side})", flush=True)
+        print(f"   - Entry Price: {entry_price}", flush=True)
+        print(f"   - Rate TP (lenh3_rate): {lenh3_rate}", flush=True)
+        
         # Tính activation price
         # ✅ FIX: Bỏ chia leverage - SL/TP tính theo % thay đổi giá, KHÔNG phụ thuộc đòn bẩy
-        # Ví dụ: lenh3_rate=0.6 → TP kích hoạt khi giá thay đổi 60% (không phải 6% khi leverage=10x)
         if is_long:
+            # Entry + (Entry * Rate)
             activation_price_raw = entry_price * (1 + lenh3_rate)
             order_side = 'sell'
+            print(f"   - Công thức LONG: {entry_price} * (1 + {lenh3_rate}) = {activation_price_raw}", flush=True)
         else:
+            # Entry - (Entry * Rate)
             activation_price_raw = entry_price * (1 - lenh3_rate)
             order_side = 'buy'
+            print(f"   - Công thức SHORT: {entry_price} * (1 - {lenh3_rate}) = {activation_price_raw}", flush=True)
         
         # Validate giá trước khi làm tròn
         if activation_price_raw <= 0:
@@ -223,6 +240,7 @@ class CascadeManager:
         try:
             activation_price_str = self.exchange.price_to_precision(symbol, activation_price_raw)
             activation_price = float(activation_price_str)
+            print(f"   - Giá sau làm tròn (Final TP Activation): {activation_price}", flush=True)
         except Exception as e:
             # Fallback: dùng round với precision
             try:
@@ -414,4 +432,3 @@ def get_cascade_manager(exchange: ccxt.binance, order_helper) -> CascadeManager:
     if _cascade_manager is None:
         _cascade_manager = CascadeManager(exchange, order_helper)
     return _cascade_manager
-
