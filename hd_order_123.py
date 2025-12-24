@@ -77,13 +77,24 @@ def getLenh23Rate(symbol, state):
         sheet_dat_lenh = gg_sheet_factory.get_dat_lenh(f"A{start_row}:G{end_row}")
         for d in sheet_dat_lenh:
             try:
+                # Kiểm tra độ dài và dữ liệu rỗng
                 if len(d) < 7: continue
                 sym = d[0]
+                if not sym: continue
+
                 val_sl = d[5].strip() if d[5] else ""
                 val_tp = d[6].strip() if d[6] else ""
-                if not val_sl or not val_tp: continue
+                
+                if not val_sl or not val_tp:
+                    continue
+                    
                 lenh2_rate = float(val_sl)
                 lenh3_rate = float(val_tp)
+                
+                # [FIX]: Nếu Rate <= 0 (do nhập nhầm số 0 trên sheet), bỏ qua để lấy mặc định
+                if lenh2_rate <= 0 or lenh3_rate <= 0:
+                    continue
+                
                 if(is_same_pair(symbol, sym)):
                     return symbol, lenh2_rate, lenh3_rate
             except ValueError: continue 
@@ -91,6 +102,7 @@ def getLenh23Rate(symbol, state):
     except Exception as e:
         logger.error(f"Lỗi đọc Google Sheet: {e}")
 
+    # Fallback về Config mặc định (30% và 60%)
     if state == STATE_LONG:
         return symbol, cst.lenh2_rate_long, cst.lenh3_rate_long
     elif state == STATE_SHORT:
@@ -182,12 +194,6 @@ def cancel_all_algo_orders_direct(symbol):
         return False
 
 def has_sl_tp_orders(symbol, exchange):
-    """
-    [LOGIC ĐÃ ĐƯỢC KIỂM CHỨNG]
-    Phân biệt SL và TP dựa trên 'callbackRate':
-    - TP (Trailing Stop): CONDITIONAL + callbackRate > 0
-    - SL (Stop Limit): CONDITIONAL + callbackRate = 0 (hoặc None)
-    """
     try:
         algo_orders = get_algo_orders_for_symbol(symbol)
         try: open_orders = exchange.fetch_open_orders(symbol)
@@ -196,43 +202,31 @@ def has_sl_tp_orders(symbol, exchange):
         has_sl = False
         has_tp = False
         
-        # --- 1. QUÉT ALGO ORDERS (Chứa cả SL và TP dạng CONDITIONAL) ---
+        # --- 1. QUÉT ALGO ORDERS ---
         active_algo_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
         
         for order in active_algo_orders:
             algo_type = order.get('algoType', '').upper()
             reduce_only = order.get('reduceOnly', False)
             
-            # Lấy callbackRate để phân biệt
             callback_rate = order.get('callbackRate')
-            
-            # Xử lý giá trị callbackRate an toàn
             callback_val = 0.0
             if callback_rate is not None:
-                try:
-                    callback_val = float(callback_rate)
-                except:
-                    callback_val = 0.0
+                try: callback_val = float(callback_rate)
+                except: callback_val = 0.0
 
             if reduce_only:
-                # == LOGIC NHẬN DIỆN TP (Trailing Stop) ==
-                # Loại CONDITIONAL hoặc VP, và CÓ callbackRate > 0
+                # TP (Trailing Stop): Rate > 0
                 if algo_type in ['CONDITIONAL', 'VP', 'TRAILING_STOP_MARKET'] and callback_val > 0:
                     has_tp = True
-                    # logger.info(f"{symbol} -> Tìm thấy TP (Trailing): Rate={callback_val}")
                 
-                # == LOGIC NHẬN DIỆN SL (Stop Limit/Market) ==
-                # Loại 1: Các loại STOP rõ ràng
+                # SL (Stop Limit): Rate = 0
                 if algo_type in ['STOP', 'STOP_MARKET', 'STOP_LOSS', 'STOP_LOSS_MARKET', 'STOP_LIMIT']:
                     has_sl = True
-                    # logger.info(f"{symbol} -> Tìm thấy SL (Type chuẩn): {algo_type}")
-                    
-                # Loại 2: CONDITIONAL nhưng KHÔNG có callbackRate (chính là Stop Limit)
                 elif algo_type == 'CONDITIONAL' and callback_val == 0:
                     has_sl = True
-                    # logger.info(f"{symbol} -> Tìm thấy SL (Type Conditional): Rate=0")
 
-        # --- 2. QUÉT OPEN ORDERS (Dự phòng cho SL thường) ---
+        # --- 2. QUÉT OPEN ORDERS ---
         if not has_sl:
             for order in open_orders:
                 order_type = order.get('type', '').upper()
@@ -240,7 +234,7 @@ def has_sl_tp_orders(symbol, exchange):
                 reduce_only = order.get('reduceOnly', False) or info.get('reduceOnly', False)
                 if order_type in ['STOP', 'STOP_LIMIT', 'STOP_MARKET'] and reduce_only:
                     has_sl = True
-
+        
         return has_sl, has_tp
         
     except Exception as e:
@@ -283,7 +277,6 @@ def do_it():
                 
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
                 
-                # Logic xác định trạng thái
                 if has_sl and has_tp:
                     print(f"⏭️  {symbol_formatted} đã ĐỦ SL và TP. Bỏ qua.", flush=True)
                     continue
@@ -320,6 +313,7 @@ def do_it():
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
                 
+                # Lấy Rate (đã fix lỗi nhận số 0)
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
 
                 if entry_price <= 0 or lenh2rate <= 0 or lenh3rate <= 0:
