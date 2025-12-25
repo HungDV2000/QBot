@@ -103,19 +103,15 @@ class BinanceOrderHelper:
         # Chuẩn bị symbol cho Binance API (loại bỏ '/')
         binance_symbol = symbol.replace('/', '')
         
-        # Chuẩn bị params chính xác theo document của Binance
-        # [FIX]: Cần thêm parameter 'algoType' nếu endpoint yêu cầu (dù document bảo không cần, nhưng error log bảo thiếu)
-        # Tuy nhiên, endpoint /fapi/v1/algoOrder thường dùng type chứ không phải algoType.
-        # Nhưng để fix lỗi -1102, ta sẽ thử cách gọi chuẩn nhất.
-        
+        # [SỬA LỖI]: Thay 'type' bằng 'algoType' để khớp với Binance API Endpoint
         params = {
             'symbol': binance_symbol,
             'side': side.upper(),
             'quantity': amount,
-            'type': 'TRAILING_STOP_MARKET',
+            'algoType': 'TRAILING_STOP_MARKET', # <--- ĐÃ SỬA TỪ 'type' THÀNH 'algoType'
             'activationPrice': format(Decimal(str(activation_price)), 'f'),
             'callbackRate': callback_rate,
-            'workingType': 'CONTRACT_PRICE' # Thêm cái này cho chắc
+            'workingType': 'CONTRACT_PRICE' 
         }
         
         if reduce_only:
