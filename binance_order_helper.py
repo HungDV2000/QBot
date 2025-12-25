@@ -1,8 +1,9 @@
 """
 Binance Order Helper - Xử lý các loại lệnh với fallback an toàn
-[FIX FINAL v4]: Tuân thủ chính xác tài liệu Algo Order (Conditional)
-- Trailing Stop: Dùng Algo API (Conditional)
-- SL/TP khác: Dùng Standard API (đang hoạt động tốt)
+[FIX FINAL v5]: 
+- Trailing Stop: Chuẩn hóa theo tài liệu Algo Order (Conditional)
+- Data Formatting: Chuyển đổi số sang String để tránh lỗi precision
+- Bổ sung: Hỗ trợ Stop Market
 """
 
 import ccxt
@@ -36,6 +37,10 @@ class BinanceOrderHelper:
     def __init__(self, exchange: ccxt.binance):
         self.exchange = exchange
     
+    def _to_str(self, value) -> str:
+        """Chuyển đổi số sang string chuẩn (không khoa học) để gửi API"""
+        return format(Decimal(str(value)), 'f')
+
     def create_trailing_stop_order(
         self, 
         symbol: str, 
@@ -46,7 +51,7 @@ class BinanceOrderHelper:
         reduce_only: bool = False
     ) -> Dict:
         """
-        Tạo lệnh Trailing Stop: Dùng Algo Order API với thông số chuẩn theo tài liệu Conditional Order.
+        Tạo lệnh Trailing Stop: Dùng Algo Order API (Conditional)
         """
         logger.info(f"Tạo Trailing Stop: {symbol} {side} {amount} @ {activation_price}, callback={callback_rate}%")
         
@@ -65,7 +70,7 @@ class BinanceOrderHelper:
             # Fallback: Thử phương thức CCXT Standard (endpoint /order)
             try:
                 # Standard API dùng 'activationPrice' (có đuôi ion)
-                str_activation_price = format(Decimal(str(activation_price)), 'f')
+                str_activation_price = self._to_str(activation_price)
                 params = {
                     'activationPrice': str_activation_price,
                     'callbackRate': callback_rate,
@@ -78,7 +83,7 @@ class BinanceOrderHelper:
                     type='TRAILING_STOP_MARKET',
                     side=side,
                     amount=amount,
-                    price=activation_price, 
+                    price=activation_price, # CCXT cần cái này để pass validation
                     params=params
                 )
                 logger.info(f"✅ Tạo lệnh Trailing Stop thành công (Fallback CCXT): Order ID {order.get('id')}")
@@ -98,28 +103,24 @@ class BinanceOrderHelper:
     ) -> Dict:
         """
         [FIXED BASED ON DOCS]:
-        - Endpoint: /fapi/v1/algoOrder
-        - algoType: 'CONDITIONAL' (Bắt buộc)
-        - type: 'TRAILING_STOP_MARKET' (Loại lệnh)
-        - activatePrice: (Tên param chuẩn cho Algo, KHÔNG có chữ 'ion')
+        - AlgoType: CONDITIONAL
+        - Type: TRAILING_STOP_MARKET
+        - Param: activatePrice
         """
         binance_symbol = symbol.replace('/', '')
         
-        # Cấu trúc params chuẩn theo tài liệu bạn cung cấp
         params = {
             'symbol': binance_symbol,
             'side': side.upper(),
-            'algoType': 'CONDITIONAL',       # <--- FIX 1: Phải là CONDITIONAL
-            'type': 'TRAILING_STOP_MARKET',  # <--- FIX 2: Loại lệnh nằm ở đây
-            'quantity': amount,
-            # <--- FIX 3: Dùng 'activatePrice' (không có 'ion') theo tài liệu Algo
-            'activatePrice': format(Decimal(str(activation_price)), 'f'),
-            'callbackRate': callback_rate,
+            'algoType': 'CONDITIONAL',       # BẮT BUỘC
+            'type': 'TRAILING_STOP_MARKET',  # LOẠI LỆNH
+            'quantity': self._to_str(amount),
+            'activatePrice': self._to_str(activation_price), # Dùng activatePrice
+            'callbackRate': self._to_str(callback_rate),
             'workingType': 'CONTRACT_PRICE'
         }
         
         if reduce_only:
-            # Lưu ý: Tài liệu Algo thường yêu cầu reduceOnly là STRING "true"/"false"
             params['reduceOnly'] = 'true'
         
         logger.info(f"📤 Payload gửi đi (Algo API): {params}")
@@ -127,7 +128,7 @@ class BinanceOrderHelper:
         # Gọi Algo Order API
         response = self.exchange.fapiPrivatePostAlgoOrder(params)
         
-        # Map response về format chung
+        # Map response
         return {
             'id': response.get('clientAlgoId'),
             'orderId': response.get('clientAlgoId'),
@@ -149,20 +150,19 @@ class BinanceOrderHelper:
         reduce_only: bool = False
     ) -> Dict:
         """
-        Tạo lệnh Stop Limit (Giữ nguyên Standard API vì đang hoạt động tốt)
+        Tạo lệnh Stop Limit (Standard API)
         """
         logger.info(f"Tạo Stop Limit: {symbol} {side} {amount} @ stop={stop_price}, limit={limit_price}")
         
         params = {
-            'stopPrice': stop_price,
+            'stopPrice': self._to_str(stop_price),
         }
         
         if reduce_only:
             params['reduceOnly'] = True
         
         try:
-            # Sử dụng Standard Order endpoint (/fapi/v1/order) thông qua CCXT
-            # type='STOP' tương ứng với Stop Limit trên Futures
+            # Type 'STOP' = Stop Limit trên Futures
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='STOP',
@@ -176,6 +176,42 @@ class BinanceOrderHelper:
             
         except Exception as e:
             logger.error(f"❌ Lỗi khi tạo lệnh Stop Limit: {e}")
+            raise e
+
+    def create_stop_market_order(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        stop_price: float,
+        reduce_only: bool = False
+    ) -> Dict:
+        """
+        [BỔ SUNG] Tạo lệnh Stop Market (Cắt lỗ thị trường - Đảm bảo khớp)
+        """
+        logger.info(f"Tạo Stop Market: {symbol} {side} {amount} @ stop={stop_price}")
+        
+        params = {
+            'stopPrice': self._to_str(stop_price),
+        }
+        
+        if reduce_only:
+            params['reduceOnly'] = True
+        
+        try:
+            # Type 'STOP_MARKET' = Stop Market trên Futures
+            order = self.exchange.create_order(
+                symbol=symbol,
+                type='STOP_MARKET',
+                side=side,
+                amount=amount,
+                params=params
+            )
+            logger.info(f"✅ Tạo lệnh Stop Market thành công: Order ID {order.get('id')}")
+            return order
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi khi tạo lệnh Stop Market: {e}")
             raise e
     
     def create_limit_order(
