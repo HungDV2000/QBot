@@ -1,6 +1,8 @@
 """
 Binance Order Helper - Xử lý các loại lệnh với fallback an toàn
-Giải quyết lỗi API -4120 khi Binance thay đổi endpoint cho Trailing Stop
+[FIX FINAL v4]: Tuân thủ chính xác tài liệu Algo Order (Conditional)
+- Trailing Stop: Dùng Algo API (Conditional)
+- SL/TP khác: Dùng Standard API (đang hoạt động tốt)
 """
 
 import ccxt
@@ -44,28 +46,26 @@ class BinanceOrderHelper:
         reduce_only: bool = False
     ) -> Dict:
         """
-        Tạo lệnh Trailing Stop: Ưu tiên dùng Algo Order API trực tiếp để đảm bảo giá Activation chuẩn.
+        Tạo lệnh Trailing Stop: Dùng Algo Order API với thông số chuẩn theo tài liệu Conditional Order.
         """
         logger.info(f"Tạo Trailing Stop: {symbol} {side} {amount} @ {activation_price}, callback={callback_rate}%")
         
-        # [THAY ĐỔI QUAN TRỌNG]: Fix lỗi thiếu tham số khi gọi Algo API
         try:
-            logger.info("🚀 Đang gửi lệnh qua Algo Order API (Direct)...")
+            logger.info("🚀 Đang gửi lệnh qua Algo Order API (CONDITIONAL)...")
             order = self._create_trailing_stop_algo_api(
                 symbol, side, amount, activation_price, callback_rate, reduce_only
             )
-            logger.info(f"✅ Tạo lệnh Trailing Stop thành công (Direct API): ClientID {order.get('id')}")
+            logger.info(f"✅ Tạo lệnh Trailing Stop thành công (Algo API): ClientID {order.get('id')}")
             return order
             
         except Exception as e_algo:
             logger.error(f"❌ Algo API thất bại: {e_algo}")
             logger.warning("⚠️ Đang thử fallback sang Standard API (CCXT)...")
             
-            # Fallback: Thử phương thức cũ nếu phương thức trực tiếp lỗi
+            # Fallback: Thử phương thức CCXT Standard (endpoint /order)
             try:
-                # Binance Futures yêu cầu activationPrice là STRING
+                # Standard API dùng 'activationPrice' (có đuôi ion)
                 str_activation_price = format(Decimal(str(activation_price)), 'f')
-                
                 params = {
                     'activationPrice': str_activation_price,
                     'callbackRate': callback_rate,
@@ -73,7 +73,6 @@ class BinanceOrderHelper:
                 if reduce_only:
                     params['reduceOnly'] = True
 
-                # [QUAN TRỌNG]: Truyền activationPrice vào cả price và params để cover mọi trường hợp của CCXT
                 order = self.exchange.create_order(
                     symbol=symbol,
                     type='TRAILING_STOP_MARKET',
@@ -98,31 +97,37 @@ class BinanceOrderHelper:
         reduce_only: bool
     ) -> Dict:
         """
-        Tạo lệnh Trailing Stop qua Algo Order API (Binance mới)
+        [FIXED BASED ON DOCS]:
+        - Endpoint: /fapi/v1/algoOrder
+        - algoType: 'CONDITIONAL' (Bắt buộc)
+        - type: 'TRAILING_STOP_MARKET' (Loại lệnh)
+        - activatePrice: (Tên param chuẩn cho Algo, KHÔNG có chữ 'ion')
         """
-        # Chuẩn bị symbol cho Binance API (loại bỏ '/')
         binance_symbol = symbol.replace('/', '')
         
-        # [SỬA LỖI]: Thay 'type' bằng 'algoType' để khớp với Binance API Endpoint
+        # Cấu trúc params chuẩn theo tài liệu bạn cung cấp
         params = {
             'symbol': binance_symbol,
             'side': side.upper(),
+            'algoType': 'CONDITIONAL',       # <--- FIX 1: Phải là CONDITIONAL
+            'type': 'TRAILING_STOP_MARKET',  # <--- FIX 2: Loại lệnh nằm ở đây
             'quantity': amount,
-            'algoType': 'TRAILING_STOP_MARKET', # <--- ĐÃ SỬA TỪ 'type' THÀNH 'algoType'
-            'activationPrice': format(Decimal(str(activation_price)), 'f'),
+            # <--- FIX 3: Dùng 'activatePrice' (không có 'ion') theo tài liệu Algo
+            'activatePrice': format(Decimal(str(activation_price)), 'f'),
             'callbackRate': callback_rate,
-            'workingType': 'CONTRACT_PRICE' 
+            'workingType': 'CONTRACT_PRICE'
         }
         
         if reduce_only:
+            # Lưu ý: Tài liệu Algo thường yêu cầu reduceOnly là STRING "true"/"false"
             params['reduceOnly'] = 'true'
         
-        logger.info(f"📤 Payload gửi đi: {params}")
+        logger.info(f"📤 Payload gửi đi (Algo API): {params}")
         
         # Gọi Algo Order API
         response = self.exchange.fapiPrivatePostAlgoOrder(params)
         
-        # Convert response để tương thích với ccxt format
+        # Map response về format chung
         return {
             'id': response.get('clientAlgoId'),
             'orderId': response.get('clientAlgoId'),
@@ -143,7 +148,9 @@ class BinanceOrderHelper:
         limit_price: float,
         reduce_only: bool = False
     ) -> Dict:
-        """Tạo lệnh Stop Limit"""
+        """
+        Tạo lệnh Stop Limit (Giữ nguyên Standard API vì đang hoạt động tốt)
+        """
         logger.info(f"Tạo Stop Limit: {symbol} {side} {amount} @ stop={stop_price}, limit={limit_price}")
         
         params = {
@@ -154,6 +161,8 @@ class BinanceOrderHelper:
             params['reduceOnly'] = True
         
         try:
+            # Sử dụng Standard Order endpoint (/fapi/v1/order) thông qua CCXT
+            # type='STOP' tương ứng với Stop Limit trên Futures
             order = self.exchange.create_order(
                 symbol=symbol,
                 type='STOP',
@@ -243,7 +252,6 @@ def cancel_all_open_orders_with_retry(
     
     for attempt in range(max_retries):
         try:
-            # Lấy danh sách lệnh chờ
             open_orders = exchange.fetch_open_orders(symbol)
             
             if not open_orders:
@@ -252,7 +260,6 @@ def cancel_all_open_orders_with_retry(
             
             logger.info(f"Phát hiện {len(open_orders)} lệnh chờ, đang hủy... (Lần {attempt + 1}/{max_retries})")
             
-            # Hủy từng lệnh
             failed_orders = []
             for order in open_orders:
                 try:
@@ -262,10 +269,7 @@ def cancel_all_open_orders_with_retry(
                     logger.warning(f"Không thể hủy lệnh {order['id']}: {e}")
                     failed_orders.append(order['id'])
             
-            # Delay trước khi verify
             time.sleep(delay)
-            
-            # Verify: Kiểm tra lại
             remaining_orders = exchange.fetch_open_orders(symbol)
             
             if len(remaining_orders) == 0:
