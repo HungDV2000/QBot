@@ -68,66 +68,67 @@ def is_same_pair(sym1, sym2):
 
 def getLenh23Rate(symbol, state):
     """
-    Lấy tỷ lệ SL/TP từ Google Sheet.
-    Có Log chi tiết để debug lỗi đọc số 0.
+    [ĐÃ SỬA CHỮA] Logic đọc Rate thông minh:
+    1. Tìm symbol trong Sheet.
+    2. Đọc cột F (SL) và G (TP).
+    3. Nếu ô trống hoặc bằng 0 -> TỰ ĐỘNG LẤY TỪ CONFIG.
+    4. Nếu có số > 0 -> Ưu tiên dùng số trong Sheet.
     """
+    # 1. Xác định vùng quét
     if state == STATE_LONG:
         start_row = 55
         end_row = 104
-        logger.info(f"🔍 [GET RATE] Đang tìm Rate LONG cho {symbol}...")
+        logger.info(f"🔍 [GET RATE] Quét LONG ({start_row}-{end_row}) cho {symbol}...")
     elif state == STATE_SHORT:
         start_row = 4
         end_row = 53
-        logger.info(f"🔍 [GET RATE] Đang tìm Rate SHORT cho {symbol}...")
+        logger.info(f"🔍 [GET RATE] Quét SHORT ({start_row}-{end_row}) cho {symbol}...")
     
+    # 2. Chuẩn bị giá trị Config mặc định
+    def_sl = cst.lenh2_rate_long if state == STATE_LONG else cst.lenh2_rate_short
+    def_tp = cst.lenh3_rate_long if state == STATE_LONG else cst.lenh3_rate_short
+
     try:
+        # Đọc dữ liệu từ Sheet
         sheet_dat_lenh = gg_sheet_factory.get_dat_lenh(f"A{start_row}:G{end_row}")
+        
         for d in sheet_dat_lenh:
             try:
-                # Kiểm tra độ dài và dữ liệu rỗng
-                if len(d) < 7: continue
+                if len(d) < 1: continue
                 sym = d[0]
                 if not sym: continue
                 
-                # Chỉ xử lý nếu khớp Symbol
+                # Nếu tìm thấy Symbol
                 if is_same_pair(symbol, sym):
-                    val_sl = d[5].strip() if d[5] else ""
-                    val_tp = d[6].strip() if d[6] else ""
                     
-                    logger.info(f"   -> Tìm thấy trong Sheet: {d}")
-                    logger.info(f"   -> Raw Values: SL='{val_sl}', TP='{val_tp}'")
+                    # --- XỬ LÝ RATE SL (Cột F / Index 5) ---
+                    try:
+                        val_sl = float(d[5]) if len(d) > 5 and d[5] else 0
+                    except: val_sl = 0
                     
-                    if not val_sl or not val_tp:
-                        logger.warning(f"   ⚠️ Dữ liệu rỗng. Bỏ qua.")
-                        continue
-                        
-                    lenh2_rate = float(val_sl)
-                    lenh3_rate = float(val_tp)
+                    # --- XỬ LÝ RATE TP (Cột G / Index 6) ---
+                    try:
+                        val_tp = float(d[6]) if len(d) > 6 and d[6] else 0
+                    except: val_tp = 0
                     
-                    logger.info(f"   -> Parsed Float: SL={lenh2_rate}, TP={lenh3_rate}")
+                    # --- LOGIC QUYẾT ĐỊNH ---
+                    # Nếu Sheet > 0 thì dùng Sheet, ngược lại dùng Config
+                    final_sl = val_sl if val_sl > 0 else def_sl
+                    final_tp = val_tp if val_tp > 0 else def_tp
                     
-                    # [FIX QUAN TRỌNG]: Nếu đọc được số 0, BỎ QUA NGAY để dùng fallback
-                    if lenh2_rate <= 0 or lenh3_rate <= 0:
-                        logger.warning(f"   ⛔ Rate <= 0 (Lỗi nhập liệu). Bỏ qua Sheet để dùng Config mặc định.")
-                        continue
+                    logger.info(f"   ✅ Tìm thấy {symbol}: Sheet(SL={val_sl}, TP={val_tp}) -> Final(SL={final_sl}, TP={final_tp})")
                     
-                    logger.info(f"   ✅ Dùng Rate từ Sheet: {lenh2_rate} / {lenh3_rate}")
-                    return symbol, lenh2_rate, lenh3_rate
-                    
-            except ValueError: continue 
-            except Exception as e:
-                logger.error(f"Lỗi parse dòng sheet: {e}")
-                
+                    return symbol, final_sl, final_tp
+
+            except Exception:
+                continue
+
     except Exception as e:
         logger.error(f"Lỗi đọc Google Sheet: {e}")
 
-    # Fallback về Config mặc định
-    logger.info(f"   ⬇️ Không tìm thấy hoặc lỗi Sheet. Dùng Default Config: SL={cst.lenh2_rate_long if state == STATE_LONG else cst.lenh2_rate_short}, TP={cst.lenh3_rate_long if state == STATE_LONG else cst.lenh3_rate_short}")
-    
-    if state == STATE_LONG:
-        return symbol, cst.lenh2_rate_long, cst.lenh3_rate_long
-    elif state == STATE_SHORT:
-         return symbol, cst.lenh2_rate_short, cst.lenh3_rate_short
+    # Fallback cuối cùng nếu không tìm thấy symbol trong sheet
+    logger.info(f"   ⬇️ Không tìm thấy {symbol} trong sheet -> Dùng Full Config: SL={def_sl}, TP={def_tp}")
+    return symbol, def_sl, def_tp
 
 def call_binance_api_direct(method, endpoint, params=None, api_key=None, secret_key=None):
     base_url = 'https://fapi.binance.com'
@@ -215,11 +216,6 @@ def cancel_all_algo_orders_direct(symbol):
         return False
 
 def has_sl_tp_orders(symbol, exchange):
-    """
-    [SMART CHECK] Phân biệt SL và TP khi cả 2 đều là 'CONDITIONAL'.
-    - TP: Bắt buộc phải có callbackRate > 0.
-    - SL: callbackRate bằng 0 hoặc không có.
-    """
     try:
         algo_orders = get_algo_orders_for_symbol(symbol)
         try: open_orders = exchange.fetch_open_orders(symbol)
@@ -345,10 +341,13 @@ def do_it():
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
                 
-                # Lấy Rate (đã thêm Log chi tiết)
+                # Lấy Rate (đã dùng hàm mới an toàn)
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
-
-                if entry_price <= 0 or lenh2rate <= 0 or lenh3rate <= 0:
+                
+                if entry_price <= 0: continue
+                # Nếu cả Sheet và Config đều trả về 0 thì mới bỏ qua (hiếm khi xảy ra nếu config đúng)
+                if lenh2rate <= 0 and lenh3rate <= 0:
+                    logger.warning(f"⚠️ {symbol}: Rate SL/TP đều <= 0. Kiểm tra lại Config.")
                     continue
 
                 print(f"🎯 Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side}", flush=True)
