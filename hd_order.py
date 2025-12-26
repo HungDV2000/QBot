@@ -6,6 +6,7 @@ import logging
 import subprocess
 import time
 import os
+import sys
 import ccxt
 from datetime import datetime
 import utils
@@ -18,12 +19,20 @@ import hmac
 import hashlib
 import urllib.parse
 
+# Cấu hình stdout để output realtime (unbuffered)
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
+
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
+# Tạo thư mục logs/ nếu chưa có
+logs_dir = Path('logs')
+logs_dir.mkdir(exist_ok=True)
+
 # Tạo tên file log với timestamp: hd_order_dd_mm_yyyy_h_m_s.log
 log_timestamp = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
-log_filename = f'hd_order_{log_timestamp}.log'
+log_filename = logs_dir / f'hd_order_{log_timestamp}.log'
 
 # Cải thiện logging với timestamp và UTF-8 encoding
 logging.basicConfig(
@@ -43,7 +52,8 @@ logger.addHandler(file_handler)
 # Tạo order logger riêng để track tất cả orders
 order_logger = logging.getLogger('order')
 order_logger.setLevel(logging.INFO)
-order_handler = logging.FileHandler('order.log', encoding='utf-8')
+order_log_path = logs_dir / 'order.log'
+order_handler = logging.FileHandler(order_log_path, encoding='utf-8')
 order_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 order_logger.addHandler(order_handler)
 
@@ -58,6 +68,14 @@ exchange = exchange_class({
     }
 })
 exchange.setSandboxMode(False)
+
+# Bắt buộc tải lại thông tin Precision mới nhất từ Binance
+print("⏳ Đang cập nhật thông tin thị trường (Precision/TickSize)...", flush=True)
+try:
+    exchange.load_markets(True) # True = Force reload
+    print("✅ Đã cập nhật xong thông tin thị trường.", flush=True)
+except Exception as e:
+    print(f"⚠️ Lỗi cập nhật markets: {e}", flush=True)
 
 # Khởi tạo order helper
 order_helper = BinanceOrderHelper(exchange)
@@ -151,11 +169,11 @@ def cancel_all_open_orders(symbol):
         for order in open_orders:
             order_id = order['id']
             cancel_result = exchange.cancel_order(order_id, symbol)
-            print(f"Hủy lệnh {order_id} kết quả: {cancel_result}")
+            print(f"Hủy lệnh {order_id} kết quả: {cancel_result}", flush=True)
             msg = f"Đã Hủy lệnh Chờ: {order['symbol']}"
             telegram_factory.send_tele(msg,cst.chat_id, True , True)
     else:
-        print(f"Không có lệnh mở nào cho {symbol}")
+        print(f"Không có lệnh mở nào cho {symbol}", flush=True)
 
 
 
@@ -245,7 +263,7 @@ def execute_command(commands):
         
         subprocess.run(commands, shell=True, check=True)
     except Exception as e:
-        print(e)
+        print(e, flush=True)
 
 def is_number(s):
     try:
@@ -262,6 +280,7 @@ LENH_CHO = "LỆNH CHỜ"
 
 def do_it():
   print(f"{datetime.now()}. Scan Vào Lệnh----------------------------------------------------", flush=True)
+  sys.stdout.flush()  # Flush ngay sau khi bắt đầu scan
   logger.info(f"{datetime.now()}. Scan Vào Lệnh----------------------------------------------------")
 
   # Đọc trạng thái hệ thống từ B2 (theo quy trình thực tế)
@@ -408,6 +427,7 @@ def do_it():
     for d in don_bay:
         row_count += 1
         print(f"📝 Đang xử lý dòng {row_count}/{len(don_bay)}", flush=True)
+        sys.stdout.flush()  # Đảm bảo flush ngay lập tức
         # Cấu trúc CỐ ĐỊNH: A=Symbol, B=Leverage, C=Callback, D=Activation, H=Capital
         # Chỉ hỗ trợ TRAILING_STOP
         leverage_idx = 1    # Cột B
@@ -664,6 +684,7 @@ while True:
     try:
         do_it()
         print(f"⏳ Chờ {cst.delay_vao_lenh} giây trước lần scan tiếp theo...", flush=True)
+        sys.stdout.flush()  # Đảm bảo flush trước khi sleep
         
     except Exception as e:
         print(f"❌ Tổng Lỗi: {e}", flush=True)
@@ -671,5 +692,6 @@ while True:
         import traceback
         traceback.print_exc()
         print(f"⏳ Chờ {cst.delay_vao_lenh} giây trước khi thử lại...", flush=True)
+        sys.stdout.flush()
 
     time.sleep(cst.delay_vao_lenh)
