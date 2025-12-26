@@ -13,9 +13,13 @@ from typing import Dict, Optional, Tuple
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 # --- CẤU HÌNH LOGGING RA FILE binance_order_helper.txt ---
-log_filename = "binance_order_helper.txt"
+# Tạo thư mục logs/ nếu chưa có
+logs_dir = Path('logs')
+logs_dir.mkdir(exist_ok=True)
+log_filename = logs_dir / "binance_order_helper.txt"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

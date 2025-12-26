@@ -15,16 +15,28 @@ import numpy as np
 import json
 
 import os
+from pathlib import Path
+
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Chỉ log ERROR vào error.log (stderr), không có file log riêng
+# Tạo thư mục logs/ nếu chưa có
+logs_dir = Path('logs')
+logs_dir.mkdir(exist_ok=True)
+
+# Chỉ log ERROR vào logs/error.log
 logging.basicConfig(
     level=logging.ERROR,  # Chỉ log ERROR
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+# Thêm file handler cho error.log
+error_log_path = logs_dir / 'error.log'
+error_handler = logging.FileHandler(error_log_path, encoding='utf-8')
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+logger.addHandler(error_handler)
 
 def set_cmd_title(title):
     ctypes.windll.kernel32.SetConsoleTitleW(title)
@@ -131,5 +143,5 @@ while True:
         logger.error(f"Tổng lỗi: {e}", exc_info=True)
         import traceback
         traceback.print_exc()
-
+    
     time.sleep(cst.delay_update_price)

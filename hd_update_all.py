@@ -5,6 +5,7 @@ import datetime
 from enum import Enum
 import numpy as np
 from datetime import datetime, timedelta
+from pathlib import Path
 import cst
 import time
 import logging
@@ -19,13 +20,23 @@ from data_collector import DataCollector, get_data_collector
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
-# Chỉ log ERROR vào error.log (stderr), không có file log riêng
+# Tạo thư mục logs/ nếu chưa có
+logs_dir = Path('logs')
+logs_dir.mkdir(exist_ok=True)
+
+# Chỉ log ERROR vào logs/error.log
 logging.basicConfig(
     level=logging.ERROR,  # Chỉ log ERROR
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+# Thêm file handler cho error.log
+error_log_path = logs_dir / 'error.log'
+error_handler = logging.FileHandler(error_log_path, encoding='utf-8')
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+logger.addHandler(error_handler)
 is_test_mode = False
 
 calculate_high_low_day_total = 40

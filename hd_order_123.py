@@ -8,6 +8,7 @@ import time
 import os
 import ccxt
 from datetime import datetime
+from pathlib import Path
 import binance_utils
 import telegram_factory
 from binance_order_helper import BinanceOrderHelper
@@ -26,8 +27,12 @@ sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure'
 file_name = os.path.basename(os.path.abspath(__file__))  
 os.system(f"title {file_name} - {cst.key_name}")
 
+# Tạo thư mục logs/ nếu chưa có
+logs_dir = Path('logs')
+logs_dir.mkdir(exist_ok=True)
+
 log_timestamp = datetime.now().strftime('%d_%m_%Y_%H_%M_%S')
-log_filename = f'hd_order_123_{log_timestamp}.log'
+log_filename = logs_dir / f'hd_order_123_{log_timestamp}.log'
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,7 +55,8 @@ logger.propagate = False
 
 order_logger = logging.getLogger('order')
 order_logger.setLevel(logging.INFO)
-order_handler = logging.FileHandler('order.log', encoding='utf-8')
+order_log_path = logs_dir / 'order.log'
+order_handler = logging.FileHandler(order_log_path, encoding='utf-8')
 order_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 order_logger.addHandler(order_handler)
 

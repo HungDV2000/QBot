@@ -7,6 +7,7 @@ import logging
 import ccxt
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from pathlib import Path
 import gg_sheet_factory
 import cst
 import binance_utils
@@ -14,7 +15,10 @@ import os
 import sys
 
 # --- CẤU HÌNH LOGGING (GHI VÀO 1 FILE DUY NHẤT) ---
-log_filename = "cascade_manager.txt"
+# Tạo thư mục logs/ nếu chưa có
+logs_dir = Path('logs')
+logs_dir.mkdir(exist_ok=True)
+log_filename = logs_dir / "cascade_manager.txt"
 
 # Cấu hình logger
 logger = logging.getLogger(__name__)
