@@ -69,7 +69,7 @@ exchange = exchange_class({
 })
 exchange.setSandboxMode(False)
 
-# Bắt buộc tải lại thông tin Precision mới nhất từ Binance
+# [FIX 1] Bắt buộc tải lại thông tin Precision mới nhất từ Binance để tránh lỗi làm tròn sai
 print("⏳ Đang cập nhật thông tin thị trường (Precision/TickSize)...", flush=True)
 try:
     exchange.load_markets(True) # True = Force reload
@@ -578,8 +578,16 @@ def do_it():
             ticker = exchange.fetch_ticker(symbol)
             lastPrice = ticker["last"]
             amountUsdt = float(capitalMoney)
-            amount = amountUsdt / lastPrice
             
+            # [FIX 2] Tính toán và LÀM TRÒN số lượng (Quantity) để tránh lỗi -1111 Precision
+            raw_amount = amountUsdt / lastPrice
+            try:
+                amount = float(exchange.amount_to_precision(symbol, raw_amount))
+                logger.info(f"[AMOUNT FIX] {symbol}: Raw={raw_amount} -> Rounded={amount}")
+            except Exception as e:
+                print(f"⚠️ Lỗi làm tròn số lượng cho {symbol}: {e}", flush=True)
+                amount = raw_amount # Fallback
+
             # Tính notional = activation_price * amount (Binance tính notional dựa trên activation_price)
             notional = activation_price * amount
             
@@ -597,7 +605,7 @@ def do_it():
             order = order_helper.create_trailing_stop_order(
                 symbol=symbol,
                 side=side,
-                amount=amount,
+                amount=amount, # Số lượng đã được làm tròn
                 activation_price=activation_price,
                 callback_rate=callback_rate,
                 reduce_only=False
