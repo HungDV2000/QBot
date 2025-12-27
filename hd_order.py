@@ -177,6 +177,48 @@ def cancel_all_open_orders(symbol):
 
 
 
+def is_symbol_tradeable(symbol):
+    """
+    Kiểm tra symbol có cho phép giao dịch không
+    Returns: (True/False, error_message)
+    """
+    try:
+        # Kiểm tra symbol có tồn tại trong markets không
+        if symbol not in exchange.markets:
+            return False, f"Symbol {symbol} không tồn tại trên Binance Futures"
+        
+        market = exchange.markets[symbol]
+        
+        # Kiểm tra trạng thái active
+        if not market.get('active', False):
+            return False, f"Symbol {symbol} đang bị tạm ngưng giao dịch (inactive)"
+        
+        # Kiểm tra có phải futures không
+        if market.get('type') != 'future':
+            return False, f"Symbol {symbol} không phải Futures contract"
+        
+        # Kiểm tra info từ Binance
+        info = market.get('info', {})
+        status = info.get('status', '').upper()
+        contract_status = info.get('contractStatus', '').upper()
+        
+        # TRADING = cho phép giao dịch bình thường
+        # Các trạng thái khác: BREAK, HALT, AUCTION_MATCH, PENDING_TRADING...
+        if status and status != 'TRADING':
+            return False, f"Symbol {symbol} status = {status} (không phải TRADING)"
+        
+        # PENDING_TRADING = chưa mở giao dịch
+        # TRADING = đang giao dịch bình thường
+        # PRE_DELIVERING, DELIVERING, DELIVERED = đang/đã giao hàng (delisting)
+        if contract_status and contract_status not in ['TRADING', '']:
+            return False, f"Symbol {symbol} contractStatus = {contract_status}"
+        
+        return True, ""
+        
+    except Exception as e:
+        logger.error(f"Lỗi khi kiểm tra tradeable cho {symbol}: {e}", exc_info=True)
+        return False, f"Lỗi kiểm tra: {str(e)}"
+
 def has_position(sym):
     """Kiểm tra symbol đã có vị thế (đã vào lệnh) chưa"""
     try:
@@ -481,6 +523,14 @@ def do_it():
                 continue
         
             sym = str(sym).strip()
+            
+            # Bước 0: Kiểm tra symbol có cho phép giao dịch không
+            print(f"🔍 [{row_count}] Kiểm tra trạng thái symbol {sym}...", flush=True)
+            is_tradeable, error_msg = is_symbol_tradeable(sym)
+            if not is_tradeable:
+                print(f"⏭️  {sym} KHÔNG THỂ GIAO DỊCH: {error_msg}, bỏ qua", flush=True)
+                logger.warning(f"{sym} không thể giao dịch: {error_msg}")
+                continue
             
             # Bước 1: Kiểm tra symbol đã có VỊ THẾ (đã vào lệnh) chưa
             print(f"🔍 [{row_count}] Kiểm tra vị thế cho {sym}...", flush=True)
