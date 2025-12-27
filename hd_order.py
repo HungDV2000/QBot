@@ -177,27 +177,56 @@ def cancel_all_open_orders(symbol):
 
 
 
+def normalize_symbol(symbol):
+    """
+    Chuẩn hóa symbol về format CCXT (có dấu /)
+    VD: BTCUSDT -> BTC/USDT, BTC/USDT -> BTC/USDT
+    """
+    symbol = symbol.strip().upper()
+    
+    # Nếu đã có dấu /, giữ nguyên
+    if '/' in symbol:
+        return symbol
+    
+    # Tự động thêm /USDT nếu chưa có
+    if symbol.endswith('USDT'):
+        base = symbol[:-4]
+        return f"{base}/USDT"
+    
+    # Fallback: thêm /USDT vào cuối
+    return f"{symbol}/USDT"
+
 def is_symbol_tradeable(symbol):
     """
     Kiểm tra symbol có cho phép giao dịch không
-    Returns: (True/False, error_message)
+    Returns: (True/False, error_message, normalized_symbol)
     """
     try:
+        # Chuẩn hóa symbol
+        original_symbol = symbol
+        symbol = normalize_symbol(symbol)
+        
+        if symbol != original_symbol:
+            logger.info(f"Đã chuẩn hóa symbol: {original_symbol} -> {symbol}")
+        
         # Kiểm tra symbol có tồn tại trong markets không
+        # Vì exchange đã config defaultType='future', nên exchange.markets CHỈ chứa futures
         if symbol not in exchange.markets:
-            return False, f"Symbol {symbol} không tồn tại trên Binance Futures"
+            # Thử tìm các symbol tương tự
+            similar = [s for s in exchange.markets.keys() if original_symbol.replace('/', '').upper() in s.replace('/', '').upper()]
+            if similar:
+                suggestion = f"Có thể bạn muốn: {', '.join(similar[:3])}"
+            else:
+                suggestion = "Không tìm thấy symbol tương tự trên Binance Futures"
+            return False, f"Symbol {symbol} không tồn tại trên Binance Futures. {suggestion}", symbol
         
         market = exchange.markets[symbol]
         
         # Kiểm tra trạng thái active
         if not market.get('active', False):
-            return False, f"Symbol {symbol} đang bị tạm ngưng giao dịch (inactive)"
+            return False, f"Symbol {symbol} đang bị tạm ngưng giao dịch (inactive)", symbol
         
-        # Kiểm tra có phải futures không
-        if market.get('type') != 'future':
-            return False, f"Symbol {symbol} không phải Futures contract"
-        
-        # Kiểm tra info từ Binance
+        # Kiểm tra info từ Binance (status)
         info = market.get('info', {})
         status = info.get('status', '').upper()
         contract_status = info.get('contractStatus', '').upper()
@@ -205,19 +234,19 @@ def is_symbol_tradeable(symbol):
         # TRADING = cho phép giao dịch bình thường
         # Các trạng thái khác: BREAK, HALT, AUCTION_MATCH, PENDING_TRADING...
         if status and status != 'TRADING':
-            return False, f"Symbol {symbol} status = {status} (không phải TRADING)"
+            return False, f"Symbol {symbol} status={status} (không phải TRADING)", symbol
         
         # PENDING_TRADING = chưa mở giao dịch
         # TRADING = đang giao dịch bình thường
         # PRE_DELIVERING, DELIVERING, DELIVERED = đang/đã giao hàng (delisting)
         if contract_status and contract_status not in ['TRADING', '']:
-            return False, f"Symbol {symbol} contractStatus = {contract_status}"
+            return False, f"Symbol {symbol} contractStatus={contract_status}", symbol
         
-        return True, ""
+        return True, "", symbol
         
     except Exception as e:
         logger.error(f"Lỗi khi kiểm tra tradeable cho {symbol}: {e}", exc_info=True)
-        return False, f"Lỗi kiểm tra: {str(e)}"
+        return False, f"Lỗi kiểm tra: {str(e)}", symbol
 
 def has_position(sym):
     """Kiểm tra symbol đã có vị thế (đã vào lệnh) chưa"""
@@ -526,11 +555,16 @@ def do_it():
             
             # Bước 0: Kiểm tra symbol có cho phép giao dịch không
             print(f"🔍 [{row_count}] Kiểm tra trạng thái symbol {sym}...", flush=True)
-            is_tradeable, error_msg = is_symbol_tradeable(sym)
+            is_tradeable, error_msg, normalized_sym = is_symbol_tradeable(sym)
             if not is_tradeable:
                 print(f"⏭️  {sym} KHÔNG THỂ GIAO DỊCH: {error_msg}, bỏ qua", flush=True)
                 logger.warning(f"{sym} không thể giao dịch: {error_msg}")
                 continue
+            
+            # Cập nhật symbol đã chuẩn hóa
+            if normalized_sym != sym:
+                logger.info(f"Symbol đã được chuẩn hóa: {sym} -> {normalized_sym}")
+                sym = normalized_sym
             
             # Bước 1: Kiểm tra symbol đã có VỊ THẾ (đã vào lệnh) chưa
             print(f"🔍 [{row_count}] Kiểm tra vị thế cho {sym}...", flush=True)
