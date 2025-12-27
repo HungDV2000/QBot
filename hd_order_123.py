@@ -6,11 +6,12 @@ import logging
 import subprocess
 import time
 import os
+import sys
 import ccxt
 from datetime import datetime
-from pathlib import Path
 import binance_utils
 import telegram_factory
+from pathlib import Path
 from binance_order_helper import BinanceOrderHelper
 from cascade_manager import CascadeManager, get_cascade_manager
 from notification_manager import NotificationManager, get_notification_manager
@@ -18,7 +19,6 @@ import requests
 import hmac
 import hashlib
 import urllib.parse
-import sys
 
 # --- CẤU HÌNH HỆ THỐNG & LOGGING ---
 sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
@@ -74,21 +74,16 @@ def is_same_pair(sym1, sym2):
 
 def getLenh23Rate(symbol, state):
     """
-    [ĐÃ SỬA CHỮA] Logic đọc Rate thông minh:
-    1. Tìm symbol trong Sheet.
-    2. Đọc cột F (SL) và G (TP).
-    3. Nếu ô trống hoặc bằng 0 -> TỰ ĐỘNG LẤY TỪ CONFIG.
-    4. Nếu có số > 0 -> Ưu tiên dùng số trong Sheet.
+    Lấy tỷ lệ SL/TP từ Google Sheet.
+    Logic: Ưu tiên Sheet > 0, nếu lỗi/trống thì dùng Config.
     """
     # 1. Xác định vùng quét
     if state == STATE_LONG:
         start_row = 55
         end_row = 104
-        logger.info(f"🔍 [GET RATE] Quét LONG ({start_row}-{end_row}) cho {symbol}...")
     elif state == STATE_SHORT:
         start_row = 4
         end_row = 53
-        logger.info(f"🔍 [GET RATE] Quét SHORT ({start_row}-{end_row}) cho {symbol}...")
     
     # 2. Chuẩn bị giá trị Config mặc định
     def_sl = cst.lenh2_rate_long if state == STATE_LONG else cst.lenh2_rate_short
@@ -274,22 +269,34 @@ def has_sl_tp_orders(symbol, exchange):
         logger.error(f"Lỗi check SL/TP: {e}", exc_info=True)
         return False, False
 
+# --- KHỞI TẠO EXCHANGE ---
+logger.info(f"{datetime.now()}. Khởi tạo Bot -------------------------")
+exchange_id = 'binance'
+exchange_class = getattr(ccxt, exchange_id)
+exchange = exchange_class({
+    'enableRateLimit': True,  
+    'apiKey': cst.key_binance,
+    'secret': cst.secret_binance,
+    'options': {'defaultType': 'future'}
+})
+exchange.setSandboxMode(False)
+
+# [FIX 1 - QUAN TRỌNG] Tải thông tin thị trường để lấy Precision rule (tránh lỗi -1111)
+print("⏳ Đang cập nhật thông tin thị trường (Precision/TickSize)...", flush=True)
+try:
+    exchange.load_markets(True) # Force reload
+    print("✅ Đã cập nhật xong thông tin thị trường.", flush=True)
+except Exception as e:
+    print(f"⚠️ Lỗi cập nhật markets: {e}", flush=True)
+
+order_helper = BinanceOrderHelper(exchange)
+cascade_mgr = get_cascade_manager(exchange, order_helper)
+
+
 # --- LOGIC CHÍNH ---
 
 def do_it():
     logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Verified Mode) -------------------------")
-    exchange_id = 'binance'
-    exchange_class = getattr(ccxt, exchange_id)
-    exchange = exchange_class({
-        'enableRateLimit': True,  
-        'apiKey': cst.key_binance,
-        'secret': cst.secret_binance,
-        'options': {'defaultType': 'future'}
-    })
-    exchange.setSandboxMode(False)
-    
-    order_helper = BinanceOrderHelper(exchange)
-    cascade_mgr = get_cascade_manager(exchange, order_helper)
     
     try:
         balance = exchange.fetch_balance()
@@ -330,7 +337,7 @@ def do_it():
                 
                 # --- TẠO LỆNH MỚI ---
                 symbol = symbol_formatted
-                position_amt = float(position['positionAmt'])
+                position_amt_raw = float(position['positionAmt']) # Số lượng thô từ sàn
                 
                 entry_price = None
                 if 'entryPrice' in position and position['entryPrice']:
@@ -343,7 +350,7 @@ def do_it():
                         entry_price = float(ticker['last'])
                     except: continue
                 
-                is_long = position_amt > 0
+                is_long = position_amt_raw > 0
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
                 
@@ -351,20 +358,31 @@ def do_it():
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
                 
                 if entry_price <= 0: continue
-                # Nếu cả Sheet và Config đều trả về 0 thì mới bỏ qua (hiếm khi xảy ra nếu config đúng)
                 if lenh2rate <= 0 and lenh3rate <= 0:
                     logger.warning(f"⚠️ {symbol}: Rate SL/TP đều <= 0. Kiểm tra lại Config.")
                     continue
 
                 print(f"🎯 Tạo SL + TP cho {symbol} | Entry: {entry_price} | Side: {side}", flush=True)
                 
+                # [FIX 2 - QUAN TRỌNG] Làm tròn số lượng (position_amt) trước khi gửi đi
+                try:
+                    # Lấy số dương để làm tròn, sau đó nhân lại dấu
+                    abs_amt = abs(position_amt_raw)
+                    abs_amt_rounded = float(exchange.amount_to_precision(symbol, abs_amt))
+                    position_amt = abs_amt_rounded if position_amt_raw > 0 else -abs_amt_rounded
+                    
+                    logger.info(f"[AMOUNT FIX] {symbol}: Raw={position_amt_raw} -> Rounded={position_amt}")
+                except Exception as e:
+                    logger.error(f"Lỗi làm tròn amount {symbol}: {e}")
+                    position_amt = position_amt_raw # Fallback
+
                 try:
                     result = cascade_mgr.on_entry_filled(
                         symbol=symbol,
                         layer_num=1,
                         entry_price=entry_price,
                         leverage=leverage,
-                        position_amt=position_amt,
+                        position_amt=position_amt, # Dùng số lượng đã làm tròn
                         side=side,
                         max_layers=3,
                         lenh2_rate=lenh2rate,
@@ -384,7 +402,7 @@ def do_it():
                         telegram_factory.send_tele(msg, cst.chat_id, True, True)
                         logger.info(f"✅ Cascade lớp 1 hoàn tất cho {symbol}")
                     else:
-                        logger.warning(f"⚠️ Cascade lớp 1 lỗi")
+                        logger.warning(f"⚠️ Cascade lớp 1 lỗi (Có thể do tạo lệnh thất bại)")
                         
                 except Exception as e:
                     logger.error(f"❌ Lỗi cascade lớp 1 cho {symbol}: {e}", exc_info=True)
