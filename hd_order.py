@@ -663,6 +663,20 @@ def do_it():
             lastPrice = ticker["last"]
             amountUsdt = float(capitalMoney)
             
+            # [VALIDATION] Kiểm tra activation price logic với giá hiện tại
+            # BUY (LONG): activation_price phải < lastPrice (chờ giá giảm xuống)
+            # SELL (SHORT): activation_price phải > lastPrice (chờ giá tăng lên)
+            if side == "buy":
+                if activation_price >= lastPrice:
+                    print(f"⚠️  {symbol}: BUY với activation_price={activation_price} >= giá hiện tại={lastPrice} → Sẽ kích hoạt ngay! Bỏ qua", flush=True)
+                    logger.warning(f"{symbol}: BUY activation_price={activation_price} >= lastPrice={lastPrice} (Order would immediately trigger)")
+                    continue
+            elif side == "sell":
+                if activation_price <= lastPrice:
+                    print(f"⚠️  {symbol}: SELL với activation_price={activation_price} <= giá hiện tại={lastPrice} → Sẽ kích hoạt ngay! Bỏ qua", flush=True)
+                    logger.warning(f"{symbol}: SELL activation_price={activation_price} <= lastPrice={lastPrice} (Order would immediately trigger)")
+                    continue
+            
             # [FIX 2] Tính toán và LÀM TRÒN số lượng (Quantity) để tránh lỗi -1111 Precision
             raw_amount = amountUsdt / lastPrice
             try:
