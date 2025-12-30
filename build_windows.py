@@ -87,11 +87,7 @@ CONFIG_FILES = [
     'config.ini.example',
     'start_all_bots.bat',
     'stop_all_bots.bat',
-    'README.md',
-    'HUONG_DAN_SU_DUNG.md',
-    'HUONG_DAN_CO_BAN.md',  # NEW: Hướng dẫn cơ bản setup và chạy
-    # 'PROJECT_COMPLETE.md',
-    # 'QUICK_CHECKLIST.md',
+    'QUICK_START.md',  # Hướng dẫn nhanh tổng hợp (CẤU TRÚC + LOGIC + SETUP)
 ]
 
 # Note: credentials.json không copy vì user cần tạo riêng
@@ -310,161 +306,76 @@ def create_readme(dist_dir):
                     QBOT V2.0 - BINANCE FUTURES TRADING BOT
 ================================================================================
 
-⭐ PHIÊN BẢN: 2.0
-📅 BUILD DATE: """ + Path(__file__).stat().st_mtime.__str__() + """
-🎯 STATUS: Production Ready
+⭐ BUILD: Production Ready
+📅 DATE: """ + str(Path(__file__).stat().st_mtime) + """
 
-📋 YÊU CẦU HỆ THỐNG
--------------------
-- Windows 10/11 (64-bit)
-- Kết nối Internet ổn định
-- Không cần cài Python (đã được đóng gói sẵn)
-
-🚀 CÀI ĐẶT
------------
-1. Giải nén toàn bộ folder này
-2. Copy file: config.ini.example → config.ini
-3. Mở config.ini và điền thông tin:
-   
-   [global]
-   key_name = Tên của bạn
-   key_binance = YOUR_BINANCE_API_KEY
-   secret_binance = YOUR_BINANCE_SECRET_KEY
-   bot_token = YOUR_TELEGRAM_BOT_TOKEN
-   chat_id = YOUR_TELEGRAM_CHAT_ID
-   spreadsheet_id = YOUR_GOOGLE_SHEETS_ID
-   
-   test_mode = true  (Để test, chuyển false khi chạy thật)
-
-⚙️ CẤU HÌNH GOOGLE SHEETS
---------------------------
-1. Truy cập: https://console.cloud.google.com
-2. Tạo Project mới hoặc chọn project có sẵn
-3. Enable "Google Sheets API"
-4. Tạo OAuth 2.0 credentials (Desktop app)
-5. Download file credentials.json
-6. Đặt credentials.json vào folder này (cùng với các .exe)
-7. Lần đầu chạy sẽ mở browser để authenticate
-
-🎮 SỬ DỤNG
+📋 YÊU CẦU
 ----------
+- Windows 10/11 (64-bit)
+- Kết nối Internet
+- Không cần Python (đã đóng gói)
 
-▶ Chạy tất cả modules (KHUYÊN DÙNG):
-   Double-click: start_all_bots.bat
+🚀 SETUP
+--------
+1. Copy: config.ini.example → config.ini
+2. Điền: API keys, Telegram, Google Sheets ID
+3. Đặt credentials.json vào folder này
+4. Lần đầu chạy sẽ mở browser để authenticate Google
 
-▶ Chạy từng module riêng:
-   Double-click vào file .exe tương ứng:
-   
-   📌 CORE MODULES (Quan trọng):
-   - hd_order.exe                    → Entry orders (Lệnh 1a, 2a, 3a)
-   - hd_order_123.exe                → Auto SL/TP (Lệnh 1b, 1c)
-   - hd_alert_possition_and_open_order.exe → Monitor positions
-   
-   📊 DATA COLLECTION MODULES:
-   - hd_update_all.exe               → Market data 47+ columns
-   - hd_update_price.exe             → Giá real-time
-   - hd_update_cho_va_khop.exe       → Trạng thái lệnh
-   - hd_update_danhmuc.exe           → Danh mục mã
-   - hd_track_30_prices.exe          → NEW: Track 30 giá gần nhất
-   
-   📱 REPORTING MODULES (NEW in v2.0):
-   - hd_periodic_report.exe          → NEW: Báo cáo định kỳ
-   
-   🔧 UTILITIES:
-   - hd_cancel_orders_schedule.exe   → Cancel scheduler
-   - hd_isolated_crossed_converter.exe → Margin converter
-   - check_status.exe                → Status checker
+🎮 CHẠY BOT
+-----------
+▶ Tất cả:    start_all_bots.bat
+▶ Từng cái:  Double-click file .exe
+▶ Dừng:      stop_all_bots.bat
 
-▶ Dừng tất cả:
-   Double-click: stop_all_bots.bat
-   Hoặc đóng tất cả cửa sổ CMD
-
-⭐ TÍNH NĂNG MỚI TRONG V2.0
----------------------------
-✅ Cascade Logic đa lớp (1a → 1b+1c+2a → 2b+2c+3a)
-✅ 47+ columns dữ liệu thị trường
-✅ Top 50 markers (🔴 near high / 🟢 near low)
-✅ Tracking 30 mức giá gần nhất
-✅ 8 loại Telegram notifications formatted
-✅ Báo cáo số dư định kỳ (1h hoặc PNL > 5%)
-✅ Fix API -4120 error (Algo Order API)
-✅ System commands: XÓA CHỜ, XÓA VỊ THẾ, STOP
-✅ Centralized error handling với retry mechanism
-
-📝 CẤU TRÚC GOOGLE SHEETS
---------------------------
-Sheet phải có các tab sau:
-- "ĐẶT LỆNH (100 MÃ)" - Bảng đặt lệnh chính
-- "100 mã (50 tăng và 50 giảm)" - Danh sách theo dõi
-- "Chờ và khớp" - Lệnh đang chờ và đã khớp
-- "list" - Whitelist
-
-📊 LOGS
--------
-- Mỗi module sẽ tạo file log riêng (vd: hd_order.log)
-- Kiểm tra logs khi gặp lỗi
-
-🆘 XỬ LÝ LỖI
+📂 CÁC MODULE
 -------------
-Lỗi: "config.ini not found"
-→ Copy config.ini.example thành config.ini và điền thông tin
+✅ hd_order.exe                    → Entry orders (Lệnh 1a)
+✅ hd_order_123.exe                → Auto SL/TP (Lệnh 1b, 1c)
+✅ hd_alert_possition_and_open_order.exe → Monitor
+✅ hd_update_all.exe               → Market data (47+ columns)
+✅ hd_update_price.exe             → Price updates
+✅ hd_update_cho_va_khop.exe       → Status updates
+✅ hd_update_danhmuc.exe           → Category updates
+✅ hd_track_30_prices.exe          → Track 30 prices
+✅ hd_periodic_report.exe          → Periodic reports
+✅ hd_cancel_orders_schedule.exe   → Cancel scheduler
+✅ hd_isolated_crossed_converter.exe → Margin converter
+✅ check_status.exe                → Status checker
 
-Lỗi: "Invalid API key" 
-→ Kiểm tra lại Binance API key/secret trong config.ini
+📚 TÀI LIỆU
+-----------
+⭐ QUICK_START.md  ← ĐỌC FILE NÀY (Cấu trúc + Logic + Setup)
 
-Lỗi: "Google Sheets API"
-→ Kiểm tra credentials.json và spreadsheet_id
+📝 LOGS
+-------
+Tất cả logs trong folder: logs/
+- hd_order_{timestamp}.log
+- cascade_manager.txt (chi tiết tính toán SL/TP)
+- order.log (tất cả orders)
 
-Lỗi: "Module không chạy"
-→ Kiểm tra file .log tương ứng để xem lỗi chi tiết
-
-⚠️ LƯU Ý AN TOÀN
-----------------
-1. KHÔNG chia sẻ file config.ini (chứa API keys)
-2. KHÔNG chia sẻ credentials.json, token.json
-3. TEST kỹ với test_mode = true trước khi chạy thật
-4. Bắt đầu với số lượng nhỏ để test
-5. Luôn theo dõi logs và Telegram notifications
+⚠️ QUAN TRỌNG
+-------------
+✅ SL/TP tính từ ENTRY PRICE (giá khớp thực tế)
+❌ KHÔNG tính từ Activation Price hoặc Current Price
+✅ Bot tự động skip symbol không hợp lệ
+✅ Bot validate tránh trigger ngay
 
 🔐 BẢO MẬT
 ----------
-- Binance API: Nên bật IP Whitelist
-- Binance API: Chỉ enable quyền SPOT & FUTURES trading
-- Binance API: KHÔNG enable quyền Withdraw
+- Binance API: Enable IP Whitelist
+- Binance API: CHỈ enable Futures Trading
+- Binance API: KHÔNG enable Withdraw
+- KHÔNG chia sẻ config.ini, credentials.json
 
 📞 HỖ TRỢ
 ---------
-- ⭐ Đọc HUONG_DAN_CO_BAN.md ĐẦU TIÊN (hướng dẫn cơ bản)
-- Đọc HUONG_DAN_SU_DUNG.md (tiếng Việt, chi tiết)
-- Đọc README.md (technical docs)
-- Đọc PROJECT_COMPLETE.md (summary)
-- Kiểm tra file logs để debug
-- Kiểm tra Telegram có nhận notifications không
-- Kiểm tra Google Sheets có update không
-
-📚 TÀI LIỆU BAO GỒM
--------------------
-✅ README.md - Technical documentation
-✅ HUONG_DAN_SU_DUNG.md - User guide tiếng Việt (800+ dòng)
-✅ HUONG_DAN_CO_BAN.md - ⭐ Hướng dẫn cơ bản setup và chạy (ĐỌC ĐẦU TIÊN)
-✅ PROJECT_COMPLETE.md - Project summary
-✅ QUICK_CHECKLIST.md - Development checklist
-
-🎯 V2.0 FEATURES
-----------------
-✅ 100% Core Features (38/38 items)
-✅ Cascade logic đa lớp
-✅ 47+ columns market data
-✅ 8 Telegram notifications
-✅ Top 50 markers
-✅ 30 price tracking
-✅ Periodic balance reports
-✅ Fix API -4120 error
-✅ System commands (XÓA CHỜ, XÓA VỊ THẾ, STOP)
+1. Đọc QUICK_START.md (hướng dẫn đầy đủ)
+2. Xem logs trong logs/ folder
+3. Chạy test scripts để debug
 
 ================================================================================
-                        QBot v2.0 - Production Ready
-                        Build: Windows EXE Package
+QBot v2.0 - Production Ready ✅
 ================================================================================
 """
     
