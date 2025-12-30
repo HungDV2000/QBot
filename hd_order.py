@@ -81,11 +81,14 @@ except Exception as e:
 order_helper = BinanceOrderHelper(exchange)
 
 def is_same_pair(sym1, sym2):
-    sym1 = sym1.replace("/", "").upper().strip()
-    sym2 = sym2.replace("/", "").upper().strip()
-    if sym1 == sym2:
-       return True
-    return False
+    """
+    So sánh 2 symbols có giống nhau không (bỏ qua format)
+    VD: HOME/USDT:USDT == HOMEUSDT == HOME/USDT
+    """
+    # Chuẩn hóa về dạng HOMEUSDT (chỉ giữ base+quote)
+    sym1 = sym1.replace("/", "").replace(":USDT", "").upper().strip()
+    sym2 = sym2.replace("/", "").replace(":USDT", "").upper().strip()
+    return sym1 == sym2
 
 def call_binance_api_direct(method, endpoint, params=None):
     """
@@ -134,8 +137,13 @@ def get_algo_orders_for_symbol(symbol):
     Tham khảo từ test_fetch_conditional_orders.py
     """
     try:
+        # [FIX] Binance API yêu cầu symbol format: HOMEUSDT (không có / và :USDT)
+        # HOME/USDT:USDT -> HOMEUSDT
+        # BID/USDT -> BIDUSDT
+        symbol_clean = symbol.replace('/', '').replace(':USDT', '')
+        
         params = {
-            'symbol': symbol.replace('/', '')
+            'symbol': symbol_clean
         }
         
         response = call_binance_api_direct('GET', '/fapi/v1/allAlgoOrders', params)
@@ -179,22 +187,29 @@ def cancel_all_open_orders(symbol):
 
 def normalize_symbol(symbol):
     """
-    Chuẩn hóa symbol về format CCXT (có dấu /)
-    VD: BTCUSDT -> BTC/USDT, BTC/USDT -> BTC/USDT
+    Chuẩn hóa symbol về format CCXT Binance Futures (có dấu / và :USDT)
+    VD: BTCUSDT -> BTC/USDT:USDT, BTC/USDT -> BTC/USDT:USDT
     """
     symbol = symbol.strip().upper()
     
-    # Nếu đã có dấu /, giữ nguyên
-    if '/' in symbol:
+    # Nếu đã có :USDT, giữ nguyên
+    if ':USDT' in symbol:
         return symbol
     
-    # Tự động thêm /USDT nếu chưa có
+    # Nếu có dấu / nhưng chưa có :USDT
+    if '/' in symbol:
+        # BID/USDT -> BID/USDT:USDT
+        if symbol.endswith('/USDT'):
+            return f"{symbol}:USDT"
+        return symbol
+    
+    # Tự động thêm /USDT:USDT nếu chưa có
     if symbol.endswith('USDT'):
         base = symbol[:-4]
-        return f"{base}/USDT"
+        return f"{base}/USDT:USDT"
     
-    # Fallback: thêm /USDT vào cuối
-    return f"{symbol}/USDT"
+    # Fallback: thêm /USDT:USDT vào cuối
+    return f"{symbol}/USDT:USDT"
 
 def is_symbol_tradeable(symbol):
     """
@@ -276,50 +291,74 @@ def has_pending_trailing_stop_order(symbol):
     """
     try:
         # Lấy algo orders từ Binance API trực tiếp
+        logger.debug(f"[CHECK PENDING] {symbol}: Đang kiểm tra algo orders...")
         algo_orders = get_algo_orders_for_symbol(symbol)
         
         if not algo_orders:
-            logger.debug(f"{symbol}: Không có algo orders")
+            logger.debug(f"[CHECK PENDING] {symbol}: Không có algo orders")
             return False
+        
+        logger.debug(f"[CHECK PENDING] {symbol}: Tìm thấy {len(algo_orders)} algo order(s)")
         
         # Lọc orders có status=NEW (active/pending) - theo test results
         active_orders = [o for o in algo_orders if o.get('algoStatus', '').upper() == 'NEW']
         
         if not active_orders:
-            logger.debug(f"{symbol}: Không có active algo orders (status=NEW)")
+            logger.debug(f"[CHECK PENDING] {symbol}: Không có active algo orders (status=NEW)")
+            # Log tất cả orders để debug
+            for o in algo_orders:
+                logger.debug(f"[CHECK PENDING] {symbol}: Found order with algoStatus={o.get('algoStatus')}, algoId={o.get('algoId')}")
             return False
         
-        # Đếm TRAILING_STOP orders
+        logger.debug(f"[CHECK PENDING] {symbol}: Có {len(active_orders)} active algo order(s)")
+        
+        # Đếm TRAILING_STOP orders (active + recent)
         # Theo test: algoType='CONDITIONAL' hoặc 'VP' là TRAILING_STOP
         trailing_stop_count = 0
         trailing_stop_details = []
         
-        for order in active_orders:
+        # [FIX] Cũng kiểm tra các lệnh TRIGGERED gần đây (trong vòng 2 phút)
+        # Vì lệnh có thể đã trigger nhưng chưa kịp check position
+        import time
+        current_time = int(time.time() * 1000)  # milliseconds
+        recent_window = 2 * 60 * 1000  # 2 phút = 120000 ms
+        
+        for order in algo_orders:  # Check TẤT CẢ orders, không chỉ active
             algo_id = order.get('algoId', 'N/A')
             algo_type = order.get('algoType', '').upper()
-            algo_status = order.get('algoStatus', '')
+            algo_status = order.get('algoStatus', '').upper()
             activate_price = order.get('activatePrice', None)
             callback_rate = order.get('callbackRate', order.get('priceRate', None))
+            create_time = order.get('createTime', 0)
             
             # TRAILING_STOP: algoType = 'CONDITIONAL' hoặc 'VP' (theo test results)
             is_trailing_stop = algo_type in ['CONDITIONAL', 'VP']
             
             if is_trailing_stop:
-                trailing_stop_count += 1
-                trailing_stop_details.append({
-                    'algo_id': algo_id,
-                    'algo_type': algo_type,
-                    'algo_status': algo_status,
-                    'activation': activate_price,
-                    'callback': callback_rate
-                })
+                # [FIX] Chấp nhận cả orders NEW hoặc TRIGGERED gần đây
+                is_active = (algo_status == 'NEW')
+                is_recent_triggered = (algo_status == 'TRIGGERED' and (current_time - create_time) < recent_window)
+                
+                if is_active or is_recent_triggered:
+                    trailing_stop_count += 1
+                    trailing_stop_details.append({
+                        'algo_id': algo_id,
+                        'algo_type': algo_type,
+                        'algo_status': algo_status,
+                        'activation': activate_price,
+                        'callback': callback_rate,
+                        'create_time': create_time
+                    })
+                    
+                    if is_recent_triggered:
+                        logger.info(f"⚠️  {symbol}: Phát hiện lệnh TRIGGERED gần đây (algoId={algo_id}, created {(current_time - create_time)/1000:.0f}s ago)")
         
-        # Nếu có ít nhất 1 TRAILING_STOP order active = đã có order (tránh trùng lặp)
+        # Nếu có ít nhất 1 TRAILING_STOP order active/recent = đã có order (tránh trùng lặp)
         if trailing_stop_count > 0:
-            detail_str = ", ".join([f"AlgoId: {d['algo_id']}, Type: {d['algo_type']}, Status: {d['algo_status']}, Activation: {d['activation']}" 
+            detail_str = ", ".join([f"AlgoId: {d['algo_id']}, Status: {d['algo_status']}" 
                                    for d in trailing_stop_details])
             logger.info(f"✅ {symbol} đã có {trailing_stop_count} TRAILING_STOP algo order(s) - {detail_str}")
-            print(f"⏭️  {symbol} đã có {trailing_stop_count} lệnh TRAILING_STOP (Algo API), bỏ qua", flush=True)
+            print(f"⏭️  {symbol} đã có {trailing_stop_count} lệnh TRAILING_STOP, bỏ qua", flush=True)
             return True
         
         return False
