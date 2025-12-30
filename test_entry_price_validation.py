@@ -27,8 +27,9 @@ def log(message):
     except Exception as e:
         print(f"[ERROR] Không ghi được log vào file: {e}", flush=True)
 
-# Symbol cần test
+# Symbol cần test (hỗ trợ cả 2 format: HOME/USDT và HOME/USDT:USDT)
 TARGET_SYMBOL = "HOME/USDT"
+TARGET_SYMBOL_ALT = "HOME/USDT:USDT"
 
 # === BƯỚC 1: Import và Khởi tạo ===
 log("=" * 80)
@@ -133,30 +134,39 @@ try:
     positions = exchange.fetch_positions()
     log(f"✅ Đã lấy {len(positions)} positions")
     
-    # Tìm position của HOME/USDT
+    # Tìm position của HOME/USDT (hỗ trợ cả 2 format)
     target_position = None
     for position in positions:
-        if position['symbol'] == TARGET_SYMBOL and float(position.get('contracts', 0)) != 0:
+        pos_symbol = position['symbol']
+        amt = float(position.get('contracts', 0))
+        
+        # Kiểm tra symbol khớp (hỗ trợ HOME/USDT hoặc HOME/USDT:USDT)
+        if amt != 0 and (pos_symbol == TARGET_SYMBOL or pos_symbol == TARGET_SYMBOL_ALT or 
+                        'HOME' in pos_symbol.upper() and 'USDT' in pos_symbol.upper()):
             target_position = position
+            TARGET_SYMBOL_FOUND = pos_symbol  # Lưu symbol thực tế tìm được
+            log(f"✅ Tìm thấy position với symbol: {pos_symbol}")
             break
     
     if not target_position:
         log("")
-        log(f"❌ Không tìm thấy position cho {TARGET_SYMBOL}")
+        log(f"❌ Không tìm thấy position cho {TARGET_SYMBOL} hoặc {TARGET_SYMBOL_ALT}")
         log(f"   (Position chưa mở hoặc đã đóng)")
         log("")
         log("💡 Để test được, bạn cần:")
         log("   1. Mở position HOMEUSDT trên Binance Futures")
         log("   2. Chạy lại script này")
+        log("")
+        log("🔍 Debug: Chạy debug_positions.py để xem tất cả positions")
     else:
         log("")
-        log(f"✅ Tìm thấy position {TARGET_SYMBOL}")
+        log(f"✅ Tìm thấy position {TARGET_SYMBOL_FOUND}")
         log("")
         
         # Lấy thông tin position
         position_amt = float(target_position.get('contracts', 0))
         side = "LONG" if position_amt > 0 else "SHORT"
-        leverage = int(target_position.get('leverage', 1))
+        leverage = int(target_position.get('leverage', 1)) if target_position.get('leverage') else 1
         
         # Lấy entry price từ position
         entry_price_from_position = None
@@ -165,7 +175,7 @@ try:
         
         # Lấy giá hiện tại
         log("📈 Lấy giá hiện tại...")
-        ticker = exchange.fetch_ticker(TARGET_SYMBOL)
+        ticker = exchange.fetch_ticker(TARGET_SYMBOL_FOUND)
         current_price = ticker['last']
         log("✅ Đã lấy giá hiện tại")
         log("")
@@ -179,7 +189,7 @@ try:
         log("┌─────────────────────────────────────────────────────────────────────┐")
         log("│ 📊 THÔNG TIN POSITION                                               │")
         log("└─────────────────────────────────────────────────────────────────────┘")
-        log(f"  Symbol:           {TARGET_SYMBOL}")
+        log(f"  Symbol:           {TARGET_SYMBOL_FOUND}")
         log(f"  Side:             {side}")
         log(f"  Amount:           {position_amt}")
         log(f"  Leverage:         {leverage}x")
