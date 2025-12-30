@@ -152,6 +152,18 @@ class CascadeManager:
         else:
             logger.info(f"⚠️ Không tạo lớp {next_layer_num} (max_layers={max_layers})")
         
+        # [LOG TỔNG HỢP KẾT QUẢ]
+        logger.info(f"=" * 50)
+        logger.info(f"🎯 [TỔNG KẾT CASCADE LỚP {layer_num}] {symbol}")
+        logger.info(f"   Entry Price: {entry_price}")
+        logger.info(f"   Position Amount: {position_amt}")
+        logger.info(f"   Side: {side}")
+        logger.info(f"   SL Order: {'✅ ' + str(result['sl_order'].get('id')) if result['sl_order'] else '❌ Thất bại'}")
+        logger.info(f"   TP Order: {'✅ ' + str(result['tp_order'].get('id')) if result['tp_order'] else '❌ Thất bại'}")
+        if result['next_entry_order']:
+            logger.info(f"   Next Entry: ✅ {result['next_entry_order'].get('id')}")
+        logger.info(f"=" * 50)
+        
         return result
     
     def _create_stop_loss(
@@ -231,6 +243,16 @@ class CascadeManager:
         
         logger.info(f"   -> Đang gửi lệnh STOP_LIMIT {order_side} giá {stop_price}")
         
+        # [LOG DATA GỬI LÊN BINANCE]
+        logger.info(f"📤 [DATA GỬI - STOP LOSS]")
+        logger.info(f"   Symbol: {symbol}")
+        logger.info(f"   Side: {order_side}")
+        logger.info(f"   Amount: {abs(position_amt)}")
+        logger.info(f"   Stop Price: {stop_price}")
+        logger.info(f"   Limit Price: {limit_price}")
+        logger.info(f"   Reduce Only: True")
+        logger.info(f"   Type: STOP_LIMIT")
+        
         order = self.order_helper.create_stop_limit_order(
             symbol=symbol,
             side=order_side,
@@ -239,6 +261,8 @@ class CascadeManager:
             limit_price=limit_price,
             reduce_only=True
         )
+        
+        logger.info(f"✅ [RESPONSE - STOP LOSS] Order ID: {order.get('id')}, Status: {order.get('status')}")
         
         return order
     
@@ -318,6 +342,16 @@ class CascadeManager:
         
         logger.info(f"   -> Đang gửi lệnh TRAILING_STOP {order_side} giá {activation_price}, callback {callback_rate}%")
         
+        # [LOG DATA GỬI LÊN BINANCE]
+        logger.info(f"📤 [DATA GỬI - TAKE PROFIT]")
+        logger.info(f"   Symbol: {symbol}")
+        logger.info(f"   Side: {order_side}")
+        logger.info(f"   Amount: {abs(position_amt)}")
+        logger.info(f"   Activation Price: {activation_price}")
+        logger.info(f"   Callback Rate: {callback_rate}%")
+        logger.info(f"   Reduce Only: True")
+        logger.info(f"   Type: TRAILING_STOP_MARKET")
+        
         order = self.order_helper.create_trailing_stop_order(
             symbol=symbol,
             side=order_side,
@@ -326,6 +360,8 @@ class CascadeManager:
             callback_rate=callback_rate,
             reduce_only=True
         )
+        
+        logger.info(f"✅ [RESPONSE - TAKE PROFIT] Order ID: {order.get('id')}, Status: {order.get('status')}")
         
         return order
     
@@ -361,6 +397,23 @@ class CascadeManager:
         
         logger.info(f"Tạo Entry {layer_num}a: {symbol} {order_type} {order_side}")
         
+        # [LOG DATA GỬI - NEXT ENTRY]
+        logger.info(f"📤 [DATA GỬI - ENTRY LỚP {layer_num}]")
+        logger.info(f"   Symbol: {symbol}")
+        logger.info(f"   Side: {order_side}")
+        logger.info(f"   Amount: {amount}")
+        logger.info(f"   Type: {order_type}")
+        logger.info(f"   Leverage: {leverage}")
+        if order_type == 'TRAILING_STOP':
+            logger.info(f"   Activation Price: {activation_price}")
+            logger.info(f"   Callback Rate: {callback_rate}%")
+        elif order_type == 'STOP_LIMIT':
+            logger.info(f"   Stop Price: {stop_price}")
+            logger.info(f"   Limit Price: {limit_price}")
+        elif order_type == 'LIMIT':
+            logger.info(f"   Limit Price: {limit_price}")
+        logger.info(f"   Reduce Only: False")
+        
         # Tạo lệnh theo loại
         if order_type == 'TRAILING_STOP':
             order = self.order_helper.create_trailing_stop_order(
@@ -395,6 +448,8 @@ class CascadeManager:
                 amount=amount,
                 reduce_only=False
             )
+        
+        logger.info(f"✅ [RESPONSE - ENTRY {layer_num}] Order ID: {order.get('id')}, Status: {order.get('status')}")
         
         return order
     
