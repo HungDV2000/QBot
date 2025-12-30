@@ -313,6 +313,13 @@ def do_it():
 
             if amount != 0:
                 print(f"🔍 Kiểm tra position: {position['symbol']}, Amount: {amount}", flush=True)
+                
+                # [DEBUG] Log toàn bộ position để debug
+                logger.info(f"📊 Position data đầy đủ: symbol={position.get('symbol')}, "
+                           f"positionAmt={position.get('positionAmt')}, "
+                           f"entryPrice={position.get('entryPrice')}, "
+                           f"leverage={position.get('leverage')}")
+                
                 symbol_formatted = position['symbol'].replace("USDT", "/USDT")
                 
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
@@ -341,16 +348,52 @@ def do_it():
                 
                 # [QUAN TRỌNG] Lấy Entry Price từ Position (giá khớp trung bình thực tế)
                 entry_price = None
+                
+                # Thử lấy từ entryPrice
                 if 'entryPrice' in position and position['entryPrice']:
                     try: 
                         entry_price = float(position['entryPrice'])
-                        logger.info(f"[ENTRY PRICE] {symbol}: Lấy từ Position API = {entry_price}")
+                        if entry_price > 0:
+                            logger.info(f"[ENTRY PRICE] {symbol}: Lấy từ Position API = {entry_price}")
+                        else:
+                            entry_price = None  # Reset nếu = 0
                     except Exception as e:
                         logger.error(f"[ENTRY PRICE] {symbol}: Lỗi parse entryPrice: {e}")
+                        entry_price = None
                 
-                # Nếu không lấy được entry price → BỎ QUA (KHÔNG dùng giá hiện tại)
+                # [FALLBACK] Nếu entryPrice = 0, thử fetch position riêng lẻ
                 if entry_price is None or entry_price <= 0:
-                    logger.error(f"❌ {symbol}: Không lấy được Entry Price từ Position. Bỏ qua symbol này.")
+                    logger.warning(f"⚠️  {symbol}: entryPrice từ balance = 0, thử fetch_positions()...")
+                    try:
+                        positions_detail = exchange.fetch_positions([symbol])
+                        for pos in positions_detail:
+                            if pos['symbol'] == symbol:
+                                ep = pos.get('entryPrice')
+                                if ep and float(ep) > 0:
+                                    entry_price = float(ep)
+                                    logger.info(f"✅ {symbol}: Lấy entryPrice từ fetch_positions = {entry_price}")
+                                    break
+                    except Exception as e:
+                        logger.error(f"❌ {symbol}: Lỗi fetch_positions: {e}")
+                
+                # [DEBUG] In ra toàn bộ position data để debug
+                if entry_price is None or entry_price <= 0:
+                    logger.error(f"❌ {symbol}: Không lấy được Entry Price từ Position.")
+                    logger.error(f"   Position data: {position}")
+                    logger.error(f"   - entryPrice value: {position.get('entryPrice')}")
+                    logger.error(f"   - entryPrice type: {type(position.get('entryPrice'))}")
+                    logger.error(f"   - Parsed value: {entry_price}")
+                    
+                    # Thử in ra order history để xem
+                    try:
+                        recent_orders = exchange.fetch_orders(symbol, limit=5)
+                        logger.error(f"   Recent orders for {symbol}:")
+                        for order in recent_orders:
+                            if order.get('status') == 'closed':
+                                logger.error(f"     - Order {order.get('id')}: price={order.get('average') or order.get('price')}, amount={order.get('filled')}")
+                    except Exception as e:
+                        logger.error(f"   Không lấy được order history: {e}")
+                    
                     continue
                 
                 is_long = position_amt_raw > 0
