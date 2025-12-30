@@ -13,6 +13,12 @@ import subprocess
 from pathlib import Path
 
 # ========================================
+# FORCE UNBUFFERED OUTPUT (Real-time logs)
+# ========================================
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+# ========================================
 # CẤU HÌNH BUILD
 # ========================================
 
@@ -98,25 +104,25 @@ CONFIG_FILES = [
 
 def print_header(text):
     """In header đẹp"""
-    print("\n" + "=" * 70)
-    print(f"  {text}")
-    print("=" * 70)
+    print("\n" + "=" * 70, flush=True)
+    print(f"  {text}", flush=True)
+    print("=" * 70, flush=True)
 
 def print_step(text):
     """In bước đang thực hiện"""
-    print(f"\n🔹 {text}")
+    print(f"\n🔹 {text}", flush=True)
 
 def print_success(text):
     """In thông báo thành công"""
-    print(f"✅ {text}")
+    print(f"✅ {text}", flush=True)
 
 def print_error(text):
     """In thông báo lỗi"""
-    print(f"❌ {text}")
+    print(f"❌ {text}", flush=True)
 
 def print_warning(text):
     """In cảnh báo"""
-    print(f"⚠️  {text}")
+    print(f"⚠️  {text}", flush=True)
 
 def check_requirements():
     """Kiểm tra yêu cầu hệ thống"""
@@ -124,7 +130,7 @@ def check_requirements():
     
     # Check Python version
     py_version = sys.version_info
-    print(f"Python version: {py_version.major}.{py_version.minor}.{py_version.micro}")
+    print(f"Python version: {py_version.major}.{py_version.minor}.{py_version.micro}", flush=True)
     if py_version.major < 3 or (py_version.major == 3 and py_version.minor < 9):
         print_error("Cần Python 3.9 trở lên!")
         return False
@@ -132,14 +138,14 @@ def check_requirements():
     # Check PyInstaller
     try:
         import PyInstaller
-        print(f"PyInstaller version: {PyInstaller.__version__}")
+        print(f"PyInstaller version: {PyInstaller.__version__}", flush=True)
         print_success("PyInstaller đã cài đặt")
     except ImportError:
         print_error("PyInstaller chưa được cài đặt!")
-        print("\nCài đặt PyInstaller:")
-        print("  python3 -m pip install pyinstaller")
-        print("\nHoặc chạy:")
-        print("  ./install_dependencies.sh")
+        print("\nCài đặt PyInstaller:", flush=True)
+        print("  python3 -m pip install pyinstaller", flush=True)
+        print("\nHoặc chạy:", flush=True)
+        print("  ./install_dependencies.sh", flush=True)
         return False
     
     # Check modules exist
@@ -150,7 +156,7 @@ def check_requirements():
             missing_modules.append(module)
             print_warning(f"Module không tồn tại: {module}")
         else:
-            print(f"  ✓ {module}")
+            print(f"  ✓ {module}", flush=True)
     
     if missing_modules:
         print_warning(f"Thiếu {len(missing_modules)} modules, sẽ bỏ qua chúng")
@@ -166,12 +172,12 @@ def clean_previous_builds():
     for dir_name in dirs_to_remove:
         if Path(dir_name).exists():
             shutil.rmtree(dir_name)
-            print(f"  Đã xóa: {dir_name}/")
+            print(f"  Đã xóa: {dir_name}/", flush=True)
     
     # Remove .spec files
     for spec_file in Path(".").glob("*.spec"):
         spec_file.unlink()
-        print(f"  Đã xóa: {spec_file.name}")
+        print(f"  Đã xóa: {spec_file.name}", flush=True)
     
     print_success("Dọn dẹp hoàn tất")
 
@@ -211,31 +217,37 @@ def build_single_module(module_name):
     cmd.append(module_name)
     
     # Print command
-    print(f"\nCommand: {' '.join(cmd)}\n")
-    sys.stdout.flush()
+    print(f"\nCommand: {' '.join(cmd)}\n", flush=True)
     
-    # Run PyInstaller
+    # Run PyInstaller với UNBUFFERED OUTPUT
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            encoding='utf-8'
+            encoding='utf-8',
+            bufsize=1,  # Line buffered
+            universal_newlines=True
         )
         
-        # Print output
-        if result.stdout:
-            for line in result.stdout.splitlines():
-                if 'ERROR' in line or 'Error' in line:
-                    print(f"  ⚠️  {line}")
-                elif 'WARNING' in line or 'Warning' in line:
-                    print(f"  ⚠️  {line}")
-                elif 'Successfully' in line or 'completed' in line:
-                    print(f"  ✓ {line}")
+        # Print output REAL-TIME
+        for line in process.stdout:
+            line = line.rstrip()
+            if 'ERROR' in line or 'Error' in line:
+                print(f"  ⚠️  {line}", flush=True)
+            elif 'WARNING' in line or 'Warning' in line:
+                print(f"  ⚠️  {line}", flush=True)
+            elif 'Successfully' in line or 'completed' in line:
+                print(f"  ✓ {line}", flush=True)
+            elif line.strip():  # Print non-empty lines
+                print(f"  {line}", flush=True)
+        
+        # Wait for completion
+        return_code = process.wait()
         
         # Check result
-        if result.returncode == 0:
+        if return_code == 0:
             exe_path = Path('dist') / exe_name
             if exe_path.exists() or Path(f'dist/{exe_name}.exe').exists():
                 print_success(f"Build thành công: {module_name}")
@@ -244,7 +256,7 @@ def build_single_module(module_name):
                 print_error(f"Build failed - không tìm thấy file output")
                 return False
         else:
-            print_error(f"Build failed với exit code: {result.returncode}")
+            print_error(f"Build failed với exit code: {return_code}")
             return False
             
     except Exception as e:
@@ -271,7 +283,7 @@ def create_distribution_package():
     if build_dir.exists():
         for exe_file in build_dir.glob("*"):
             if exe_file.is_file():
-                print(f"  Copying: {exe_file.name}")
+                print(f"  Copying: {exe_file.name}", flush=True)
                 shutil.copy(exe_file, dist_dir / exe_file.name)
                 exe_count += 1
     
@@ -286,7 +298,7 @@ def create_distribution_package():
     for config_file in CONFIG_FILES:
         if Path(config_file).exists():
             shutil.copy(config_file, dist_dir / config_file)
-            print(f"  ✓ {config_file}")
+            print(f"  ✓ {config_file}", flush=True)
     
     # Create README
     print_step("Tạo README.txt...")
@@ -382,7 +394,7 @@ QBot v2.0 - Production Ready ✅
     with open(dist_dir / "README.txt", "w", encoding="utf-8") as f:
         f.write(readme_content)
     
-    print("  ✓ README.txt")
+    print("  ✓ README.txt", flush=True)
 
 def create_batch_scripts(dist_dir):
     """Tạo các batch scripts để chạy .exe"""
@@ -516,7 +528,7 @@ pause
     
     with open(dist_dir / "start_all_bots.bat", "w", encoding="utf-8") as f:
         f.write(start_script)
-    print("  ✓ start_all_bots.bat")
+    print("  ✓ start_all_bots.bat", flush=True)
     
     # Stop script
     stop_script = """@echo off
@@ -554,15 +566,15 @@ pause
     
     with open(dist_dir / "stop_all_bots.bat", "w", encoding="utf-8") as f:
         f.write(stop_script)
-    print("  ✓ stop_all_bots.bat")
+    print("  ✓ stop_all_bots.bat", flush=True)
 
 def main():
     """Main function"""
     print_header("QBOT V2.0 - WINDOWS BUILD SCRIPT")
-    print("Build 12 modules thành .exe files cho Windows")
-    print("Chạy trên: Mac/Linux → Build cho Windows VPS")
-    print(f"Platform: {sys.platform}")
-    print(f"Python: {sys.version}")
+    print("Build 12 modules thành .exe files cho Windows", flush=True)
+    print("Chạy trên: Mac/Linux → Build cho Windows VPS", flush=True)
+    print(f"Platform: {sys.platform}", flush=True)
+    print(f"Python: {sys.version}", flush=True)
     
     # Kiểm tra yêu cầu
     if not check_requirements():
@@ -580,7 +592,7 @@ def main():
     skipped_modules = []
     
     for i, module in enumerate(MODULES, 1):
-        print(f"\n[{i}/{len(MODULES)}] Building {module}...")
+        print(f"\n[{i}/{len(MODULES)}] Building {module}...", flush=True)
         
         if not Path(module).exists():
             print_warning(f"Module không tồn tại, bỏ qua: {module}")
@@ -594,17 +606,17 @@ def main():
     
     # Summary
     print_header("KẾT QUẢ BUILD")
-    print(f"\n✅ Thành công: {success_count}/{len(MODULES)}")
+    print(f"\n✅ Thành công: {success_count}/{len(MODULES)}", flush=True)
     
     if skipped_modules:
-        print(f"⏭️  Bỏ qua: {len(skipped_modules)}")
+        print(f"⏭️  Bỏ qua: {len(skipped_modules)}", flush=True)
         for mod in skipped_modules:
-            print(f"   - {mod}")
+            print(f"   - {mod}", flush=True)
     
     if failed_modules:
-        print(f"\n❌ Thất bại: {len(failed_modules)}")
+        print(f"\n❌ Thất bại: {len(failed_modules)}", flush=True)
         for mod in failed_modules:
-            print(f"   - {mod}")
+            print(f"   - {mod}", flush=True)
     
     # Tạo distribution package
     if success_count > 0:
@@ -612,23 +624,23 @@ def main():
         
         if dist_dir:
             print_header("✅ BUILD HOÀN TẤT!")
-            print(f"\n📦 Package: {dist_dir.absolute()}")
-            print("\n📋 Các bước tiếp theo:")
-            print("   1. Copy folder 'dist_windows' sang máy Windows")
-            print("   2. Đọc README.txt trong folder")
-            print("   3. Cấu hình config.ini")
-            print("   4. Chạy start_all_bots.bat")
-            print("\n" + "=" * 70)
+            print(f"\n📦 Package: {dist_dir.absolute()}", flush=True)
+            print("\n📋 Các bước tiếp theo:", flush=True)
+            print("   1. Copy folder 'dist_windows' sang máy Windows", flush=True)
+            print("   2. Đọc README.txt trong folder", flush=True)
+            print("   3. Cấu hình config.ini", flush=True)
+            print("   4. Chạy start_all_bots.bat", flush=True)
+            print("\n" + "=" * 70, flush=True)
             return 0
         else:
             print_error("Không thể tạo distribution package!")
             return 1
     else:
         print_error("\nKhông có module nào được build thành công!")
-        print("\nKiểm tra:")
-        print("  - PyInstaller đã cài đúng chưa: python3 -m pip install pyinstaller")
-        print("  - Các module .py có tồn tại không")
-        print("  - Xem log chi tiết ở trên")
+        print("\nKiểm tra:", flush=True)
+        print("  - PyInstaller đã cài đúng chưa: python3 -m pip install pyinstaller", flush=True)
+        print("  - Các module .py có tồn tại không", flush=True)
+        print("  - Xem log chi tiết ở trên", flush=True)
         return 1
 
 if __name__ == "__main__":
@@ -636,7 +648,7 @@ if __name__ == "__main__":
         exit_code = main()
         sys.exit(exit_code)
     except KeyboardInterrupt:
-        print("\n\n⚠️  Build bị hủy bởi user")
+        print("\n\n⚠️  Build bị hủy bởi user", flush=True)
         sys.exit(130)
     except Exception as e:
         print_error(f"\nLỗi không mong đợi: {e}")
