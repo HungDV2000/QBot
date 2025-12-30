@@ -383,7 +383,10 @@ def do_it():
                 position_side = position.get('side', '').lower()
                 is_long = (position_side == 'long')
                 side = STATE_LONG if is_long else STATE_SHORT
-                leverage = int(position.get('leverage', 1))
+                
+                # [FIX] leverage có thể là None → cần xử lý an toàn
+                leverage_raw = position.get('leverage')
+                leverage = int(leverage_raw) if leverage_raw and leverage_raw != 'None' else 1
                 
                 logger.info(f"[POSITION] {symbol}: Side={position_side}, Is_Long={is_long}, Leverage={leverage}")
                 
