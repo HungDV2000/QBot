@@ -298,29 +298,43 @@ cascade_mgr = get_cascade_manager(exchange, order_helper)
 def do_it():
     logger.info(f"{datetime.now()}. Scan Vào Lệnh 123 (Verified Mode) -------------------------")
     
+    # [FIX CRITICAL] Dùng fetch_positions() thay vì balance['info']['positions']
+    # Vì balance['info']['positions'] KHÔNG trả về entryPrice!
     try:
-        balance = exchange.fetch_balance()
-        positions = balance['info']['positions']
+        positions = exchange.fetch_positions()
+        logger.info(f"✅ Đã lấy {len(positions)} positions từ fetch_positions()")
     except Exception as e:
-        logger.error(f"Lỗi khi lấy balance/positions: {e}")
+        logger.error(f"Lỗi khi lấy positions: {e}")
         return
 
     for position in positions:
         try:
+            # [FIX] CCXT fetch_positions() trả về format khác:
+            # - 'contracts' thay vì 'positionAmt'
+            # - 'symbol' đã là 'HOME/USDT:USDT' format
+            # - 'entryPrice' có sẵn!
             try:
-                amount = float(position['positionAmt'])
-            except: amount = 0.0
+                amount = float(position.get('contracts', 0))
+            except: 
+                amount = 0.0
 
             if amount != 0:
-                print(f"🔍 Kiểm tra position: {position['symbol']}, Amount: {amount}", flush=True)
+                symbol = position['symbol']  # Đã là 'HOME/USDT:USDT'
+                
+                # Chuẩn hóa symbol (bỏ :USDT nếu có)
+                if ':USDT' in symbol:
+                    symbol_formatted = symbol.replace(':USDT', '')
+                else:
+                    symbol_formatted = symbol
+                
+                print(f"🔍 Kiểm tra position: {symbol_formatted}, Amount: {amount}", flush=True)
                 
                 # [DEBUG] Log toàn bộ position để debug
                 logger.info(f"📊 Position data đầy đủ: symbol={position.get('symbol')}, "
-                           f"positionAmt={position.get('positionAmt')}, "
+                           f"contracts={position.get('contracts')}, "
                            f"entryPrice={position.get('entryPrice')}, "
-                           f"leverage={position.get('leverage')}")
-                
-                symbol_formatted = position['symbol'].replace("USDT", "/USDT")
+                           f"leverage={position.get('leverage')}, "
+                           f"side={position.get('side')}")
                 
                 has_sl, has_tp = has_sl_tp_orders(symbol_formatted, exchange)
                 
@@ -344,61 +358,34 @@ def do_it():
                 
                 # --- TẠO LỆNH MỚI ---
                 symbol = symbol_formatted
-                position_amt_raw = float(position['positionAmt']) # Số lượng thô từ sàn
+                position_amt_raw = float(position['contracts']) # Số lượng từ CCXT (luôn dương)
                 
-                # [QUAN TRỌNG] Lấy Entry Price từ Position (giá khớp trung bình thực tế)
+                # [QUAN TRỌNG] Lấy Entry Price từ Position (CCXT đã chuẩn hóa)
                 entry_price = None
-                
-                # Thử lấy từ entryPrice
                 if 'entryPrice' in position and position['entryPrice']:
                     try: 
                         entry_price = float(position['entryPrice'])
                         if entry_price > 0:
-                            logger.info(f"[ENTRY PRICE] {symbol}: Lấy từ Position API = {entry_price}")
+                            logger.info(f"[ENTRY PRICE] {symbol}: {entry_price}")
                         else:
-                            entry_price = None  # Reset nếu = 0
+                            logger.warning(f"⚠️  {symbol}: entryPrice = {entry_price} (không hợp lệ)")
+                            entry_price = None
                     except Exception as e:
                         logger.error(f"[ENTRY PRICE] {symbol}: Lỗi parse entryPrice: {e}")
                         entry_price = None
                 
-                # [FALLBACK] Nếu entryPrice = 0, thử fetch position riêng lẻ
+                # Nếu không lấy được entry price → BỎ QUA
                 if entry_price is None or entry_price <= 0:
-                    logger.warning(f"⚠️  {symbol}: entryPrice từ balance = 0, thử fetch_positions()...")
-                    try:
-                        positions_detail = exchange.fetch_positions([symbol])
-                        for pos in positions_detail:
-                            if pos['symbol'] == symbol:
-                                ep = pos.get('entryPrice')
-                                if ep and float(ep) > 0:
-                                    entry_price = float(ep)
-                                    logger.info(f"✅ {symbol}: Lấy entryPrice từ fetch_positions = {entry_price}")
-                                    break
-                    except Exception as e:
-                        logger.error(f"❌ {symbol}: Lỗi fetch_positions: {e}")
-                
-                # [DEBUG] In ra toàn bộ position data để debug
-                if entry_price is None or entry_price <= 0:
-                    logger.error(f"❌ {symbol}: Không lấy được Entry Price từ Position.")
-                    logger.error(f"   Position data: {position}")
-                    logger.error(f"   - entryPrice value: {position.get('entryPrice')}")
-                    logger.error(f"   - entryPrice type: {type(position.get('entryPrice'))}")
-                    logger.error(f"   - Parsed value: {entry_price}")
-                    
-                    # Thử in ra order history để xem
-                    try:
-                        recent_orders = exchange.fetch_orders(symbol, limit=5)
-                        logger.error(f"   Recent orders for {symbol}:")
-                        for order in recent_orders:
-                            if order.get('status') == 'closed':
-                                logger.error(f"     - Order {order.get('id')}: price={order.get('average') or order.get('price')}, amount={order.get('filled')}")
-                    except Exception as e:
-                        logger.error(f"   Không lấy được order history: {e}")
-                    
+                    logger.error(f"❌ {symbol}: Không lấy được Entry Price. Position data: {position}")
                     continue
                 
-                is_long = position_amt_raw > 0
+                # [FIX] CCXT fetch_positions() trả về 'side' rõ ràng
+                position_side = position.get('side', '').lower()
+                is_long = (position_side == 'long')
                 side = STATE_LONG if is_long else STATE_SHORT
                 leverage = int(position.get('leverage', 1))
+                
+                logger.info(f"[POSITION] {symbol}: Side={position_side}, Is_Long={is_long}, Leverage={leverage}")
                 
                 # Lấy Rate (đã dùng hàm mới an toàn)
                 sb, lenh2rate, lenh3rate = getLenh23Rate(symbol, side)
@@ -412,15 +399,14 @@ def do_it():
                 
                 # [FIX 2 - QUAN TRỌNG] Làm tròn số lượng (position_amt) trước khi gửi đi
                 try:
-                    # Lấy số dương để làm tròn, sau đó nhân lại dấu
-                    abs_amt = abs(position_amt_raw)
-                    abs_amt_rounded = float(exchange.amount_to_precision(symbol, abs_amt))
-                    position_amt = abs_amt_rounded if position_amt_raw > 0 else -abs_amt_rounded
+                    # CCXT contracts luôn dương, cần thêm dấu dựa vào side
+                    position_amt_rounded = float(exchange.amount_to_precision(symbol, position_amt_raw))
+                    position_amt = position_amt_rounded if is_long else -position_amt_rounded
                     
                     logger.info(f"[AMOUNT FIX] {symbol}: Raw={position_amt_raw} -> Rounded={position_amt}")
                 except Exception as e:
                     logger.error(f"Lỗi làm tròn amount {symbol}: {e}")
-                    position_amt = position_amt_raw # Fallback
+                    position_amt = position_amt_raw if is_long else -position_amt_raw  # Fallback
 
                 try:
                     result = cascade_mgr.on_entry_filled(

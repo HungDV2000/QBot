@@ -165,7 +165,10 @@ try:
         
         # Lấy thông tin position
         position_amt = float(target_position.get('contracts', 0))
-        side = "LONG" if position_amt > 0 else "SHORT"
+        
+        # [FIX] CCXT contracts luôn dương! Phải dùng 'side' để xác định LONG/SHORT
+        position_side = target_position.get('side', '').lower()
+        side = "LONG" if position_side == 'long' else "SHORT"
         leverage = int(target_position.get('leverage', 1)) if target_position.get('leverage') else 1
         
         # Lấy entry price từ position
@@ -190,8 +193,8 @@ try:
         log("│ 📊 THÔNG TIN POSITION                                               │")
         log("└─────────────────────────────────────────────────────────────────────┘")
         log(f"  Symbol:           {TARGET_SYMBOL_FOUND}")
-        log(f"  Side:             {side}")
-        log(f"  Amount:           {position_amt}")
+        log(f"  Side:             {side} (từ position.side={position_side})")
+        log(f"  Contracts:        {position_amt} (luôn dương trong CCXT)")
         log(f"  Leverage:         {leverage}x")
         log("")
         
