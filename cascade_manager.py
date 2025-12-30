@@ -206,6 +206,27 @@ class CascadeManager:
         if stop_price <= 0:
             raise ValueError(f"Stop price sau khi làm tròn = {stop_price} (phải > 0). Giá gốc: {stop_price_raw}")
         
+        # [VALIDATION] Kiểm tra logic so với giá hiện tại
+        try:
+            ticker = self.exchange.fetch_ticker(symbol)
+            current_price = ticker['last']
+            logger.info(f"   - Giá hiện tại (current): {current_price}")
+            
+            # LONG: stop_price phải < current_price (chờ giá giảm xuống)
+            # SHORT: stop_price phải > current_price (chờ giá tăng lên)
+            if is_long:
+                if stop_price >= current_price:
+                    logger.error(f"   ❌ SL LONG: stop_price={stop_price} >= current={current_price} → Trigger ngay!")
+                    raise ValueError(f"SL LONG sai logic: stop_price={stop_price} phải < current_price={current_price}")
+            else:
+                if stop_price <= current_price:
+                    logger.error(f"   ❌ SL SHORT: stop_price={stop_price} <= current={current_price} → Trigger ngay!")
+                    raise ValueError(f"SL SHORT sai logic: stop_price={stop_price} phải > current_price={current_price}")
+            
+            logger.info(f"   ✅ Validation OK: SL logic đúng với giá hiện tại")
+        except ccxt.NetworkError as e:
+            logger.warning(f"   ⚠️ Không lấy được giá hiện tại: {e} - Bỏ qua validation")
+        
         limit_price = stop_price
         
         logger.info(f"   -> Đang gửi lệnh STOP_LIMIT {order_side} giá {stop_price}")
@@ -273,6 +294,27 @@ class CascadeManager:
         
         if activation_price <= 0:
             raise ValueError(f"Activation price sau khi làm tròn = {activation_price} (phải > 0). Giá gốc: {activation_price_raw}")
+        
+        # [VALIDATION] Kiểm tra logic so với giá hiện tại
+        try:
+            ticker = self.exchange.fetch_ticker(symbol)
+            current_price = ticker['last']
+            logger.info(f"   - Giá hiện tại (current): {current_price}")
+            
+            # LONG: activation_price phải > current_price (chờ giá tăng lên)
+            # SHORT: activation_price phải < current_price (chờ giá giảm xuống)
+            if is_long:
+                if activation_price <= current_price:
+                    logger.error(f"   ❌ TP LONG: activation={activation_price} <= current={current_price} → Trigger ngay!")
+                    raise ValueError(f"TP LONG sai logic: activation_price={activation_price} phải > current_price={current_price}")
+            else:
+                if activation_price >= current_price:
+                    logger.error(f"   ❌ TP SHORT: activation={activation_price} >= current={current_price} → Trigger ngay!")
+                    raise ValueError(f"TP SHORT sai logic: activation_price={activation_price} phải < current_price={current_price}")
+            
+            logger.info(f"   ✅ Validation OK: TP logic đúng với giá hiện tại")
+        except ccxt.NetworkError as e:
+            logger.warning(f"   ⚠️ Không lấy được giá hiện tại: {e} - Bỏ qua validation")
         
         logger.info(f"   -> Đang gửi lệnh TRAILING_STOP {order_side} giá {activation_price}, callback {callback_rate}%")
         
