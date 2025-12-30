@@ -339,16 +339,19 @@ def do_it():
                 symbol = symbol_formatted
                 position_amt_raw = float(position['positionAmt']) # Số lượng thô từ sàn
                 
+                # [QUAN TRỌNG] Lấy Entry Price từ Position (giá khớp trung bình thực tế)
                 entry_price = None
                 if 'entryPrice' in position and position['entryPrice']:
-                    try: entry_price = float(position['entryPrice'])
-                    except: pass
+                    try: 
+                        entry_price = float(position['entryPrice'])
+                        logger.info(f"[ENTRY PRICE] {symbol}: Lấy từ Position API = {entry_price}")
+                    except Exception as e:
+                        logger.error(f"[ENTRY PRICE] {symbol}: Lỗi parse entryPrice: {e}")
                 
+                # Nếu không lấy được entry price → BỎ QUA (KHÔNG dùng giá hiện tại)
                 if entry_price is None or entry_price <= 0:
-                    try:
-                        ticker = exchange.fetch_ticker(symbol_formatted)
-                        entry_price = float(ticker['last'])
-                    except: continue
+                    logger.error(f"❌ {symbol}: Không lấy được Entry Price từ Position. Bỏ qua symbol này.")
+                    continue
                 
                 is_long = position_amt_raw > 0
                 side = STATE_LONG if is_long else STATE_SHORT
