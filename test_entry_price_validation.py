@@ -4,30 +4,13 @@ Mục đích: Xác minh rằng bot CHỈ lấy giá từ Position API, không fa
 Test cụ thể cho: HOMEUSDT
 """
 
-import ccxt
-import configparser
+import sys
+import traceback
+
+# Tạo thư mục logs ngay từ đầu
 from pathlib import Path
 from datetime import datetime
 
-# Symbol cần test
-TARGET_SYMBOL = "HOME/USDT"
-
-# Đọc config
-config = configparser.ConfigParser()
-config_path = Path(__file__).parent / 'config.ini'
-config.read(config_path, encoding='utf-8')
-
-api_key = config.get('Binance', 'api_key')
-secret_key = config.get('Binance', 'secret_key')
-
-# Khởi tạo exchange
-exchange = ccxt.binance({
-    'apiKey': api_key,
-    'secret': secret_key,
-    'options': {'defaultType': 'future'}
-})
-
-# Tạo thư mục logs nếu chưa có
 logs_dir = Path('logs')
 logs_dir.mkdir(exist_ok=True)
 
@@ -37,11 +20,73 @@ log_filename = logs_dir / f'test_entry_price_{timestamp}.txt'
 
 # Hàm ghi log (vào cả file và console)
 def log(message):
-    print(message)
-    with open(log_filename, 'a', encoding='utf-8') as f:
-        f.write(message + '\n')
+    print(message, flush=True)
+    try:
+        with open(log_filename, 'a', encoding='utf-8') as f:
+            f.write(message + '\n')
+    except Exception as e:
+        print(f"[ERROR] Không ghi được log vào file: {e}", flush=True)
 
-# Bắt đầu test
+# Symbol cần test
+TARGET_SYMBOL = "HOME/USDT"
+
+# === BƯỚC 1: Import và Khởi tạo ===
+log("=" * 80)
+log("🚀 KHỞI ĐỘNG TEST ENTRY PRICE LOGIC")
+log("=" * 80)
+
+try:
+    log("📦 Import thư viện...")
+    import ccxt
+    import configparser
+    log("✅ Import thành công")
+except ImportError as e:
+    log(f"❌ Lỗi import: {e}")
+    log("💡 Cài đặt: pip install ccxt")
+    input("\n⏸️  Nhấn Enter để thoát...")
+    sys.exit(1)
+
+# === BƯỚC 2: Đọc Config ===
+try:
+    log("📄 Đọc config.ini...")
+    config = configparser.ConfigParser()
+    config_path = Path(__file__).parent / 'config.ini'
+    
+    if not config_path.exists():
+        log(f"❌ Không tìm thấy file config.ini tại: {config_path}")
+        input("\n⏸️  Nhấn Enter để thoát...")
+        sys.exit(1)
+    
+    config.read(config_path, encoding='utf-8')
+    api_key = config.get('Binance', 'api_key')
+    secret_key = config.get('Binance', 'secret_key')
+    log("✅ Đọc config thành công")
+except Exception as e:
+    log(f"❌ Lỗi đọc config: {e}")
+    log(traceback.format_exc())
+    input("\n⏸️  Nhấn Enter để thoát...")
+    sys.exit(1)
+
+# === BƯỚC 3: Khởi tạo Exchange ===
+try:
+    log("🔌 Kết nối Binance...")
+    exchange = ccxt.binance({
+        'apiKey': api_key,
+        'secret': secret_key,
+        'options': {'defaultType': 'future'},
+        'timeout': 30000,
+        'enableRateLimit': True
+    })
+    log("✅ Kết nối thành công")
+except Exception as e:
+    log(f"❌ Lỗi kết nối Binance: {e}")
+    log(traceback.format_exc())
+    input("\n⏸️  Nhấn Enter để thoát...")
+    sys.exit(1)
+
+log("")
+
+# === BƯỚC 4: Test Position ===
 log("=" * 80)
 log(f"🔍 KIỂM TRA ENTRY PRICE LOGIC - {TARGET_SYMBOL}")
 log(f"📅 Thời gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -51,7 +96,9 @@ log("")
 
 # Lấy tất cả positions
 try:
+    log("📊 Lấy danh sách positions từ Binance...")
     positions = exchange.fetch_positions()
+    log(f"✅ Đã lấy {len(positions)} positions")
     
     # Tìm position của HOME/USDT
     target_position = None
@@ -61,9 +108,15 @@ try:
             break
     
     if not target_position:
+        log("")
         log(f"❌ Không tìm thấy position cho {TARGET_SYMBOL}")
         log(f"   (Position chưa mở hoặc đã đóng)")
+        log("")
+        log("💡 Để test được, bạn cần:")
+        log("   1. Mở position HOMEUSDT trên Binance Futures")
+        log("   2. Chạy lại script này")
     else:
+        log("")
         log(f"✅ Tìm thấy position {TARGET_SYMBOL}")
         log("")
         
@@ -78,8 +131,11 @@ try:
             entry_price_from_position = float(target_position['entryPrice'])
         
         # Lấy giá hiện tại
+        log("📈 Lấy giá hiện tại...")
         ticker = exchange.fetch_ticker(TARGET_SYMBOL)
         current_price = ticker['last']
+        log("✅ Đã lấy giá hiện tại")
+        log("")
         
         # Tính % chênh lệch
         diff_pct = 0.0
@@ -169,13 +225,22 @@ try:
         
         log("")
 
+except ccxt.NetworkError as e:
+    log("")
+    log(f"❌ LỖI MẠNG: {e}")
+    log("💡 Kiểm tra kết nối internet và thử lại")
+    log(traceback.format_exc())
+except ccxt.AuthenticationError as e:
+    log("")
+    log(f"❌ LỖI XÁC THỰC: {e}")
+    log("💡 Kiểm tra API key/secret trong config.ini")
+    log(traceback.format_exc())
 except Exception as e:
-    log(f"❌ Lỗi: {e}")
-    import traceback
-    error_msg = traceback.format_exc()
-    log(error_msg)
+    log("")
+    log(f"❌ LỖI: {e}")
+    log(traceback.format_exc())
 
-# Kết luận
+# === KẾT LUẬN ===
 log("")
 log("=" * 80)
 log("📋 TÓM TẮT:")
@@ -189,4 +254,16 @@ log("🎯 Current Price = Giá thị trường hiện tại (chỉ dùng để v
 log("=" * 80)
 log(f"✅ Log đã lưu vào: {log_filename}")
 log("=" * 80)
+log("")
+log("✅ TEST HOÀN TẤT - Terminal không tự động tắt")
+log("⏸️  Nhấn Ctrl+C hoặc đóng terminal để thoát")
+log("")
+
+# Giữ terminal mở
+try:
+    input("⏸️  Nhấn Enter để thoát...")
+except KeyboardInterrupt:
+    log("\n👋 Đã thoát bằng Ctrl+C")
+except:
+    pass
 
