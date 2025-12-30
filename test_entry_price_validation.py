@@ -58,8 +58,41 @@ try:
         sys.exit(1)
     
     config.read(config_path, encoding='utf-8')
-    api_key = config.get('Binance', 'api_key')
-    secret_key = config.get('Binance', 'secret_key')
+    
+    # Tìm API key/secret (hỗ trợ nhiều format khác nhau)
+    api_key = None
+    secret_key = None
+    
+    # Thử các section và tên key khác nhau
+    possible_sections = ['global', 'Binance', 'binance', 'DEFAULT']
+    possible_key_names = [
+        ('key_binance', 'secret_binance'),
+        ('api_key', 'secret_key'),
+        ('apiKey', 'secretKey'),
+    ]
+    
+    for section in possible_sections:
+        if not config.has_section(section) and section != 'DEFAULT':
+            continue
+        
+        for key_name, secret_name in possible_key_names:
+            try:
+                api_key = config.get(section, key_name)
+                secret_key = config.get(section, secret_name)
+                log(f"✅ Tìm thấy API key trong section [{section}]")
+                break
+            except:
+                continue
+        
+        if api_key and secret_key:
+            break
+    
+    if not api_key or not secret_key:
+        log("❌ Không tìm thấy API key/secret trong config.ini")
+        log("💡 Kiểm tra file config.ini có chứa key_binance và secret_binance")
+        input("\n⏸️  Nhấn Enter để thoát...")
+        sys.exit(1)
+    
     log("✅ Đọc config thành công")
 except Exception as e:
     log(f"❌ Lỗi đọc config: {e}")
