@@ -89,8 +89,9 @@ CONFIG_FILES = [
     'stop_all_bots.bat',
     'README.md',
     'HUONG_DAN_SU_DUNG.md',
-    'PROJECT_COMPLETE.md',
-    'QUICK_CHECKLIST.md',
+    'HUONG_DAN_CO_BAN.md',  # NEW: Hướng dẫn cơ bản setup và chạy
+    # 'PROJECT_COMPLETE.md',
+    # 'QUICK_CHECKLIST.md',
 ]
 
 # Note: credentials.json không copy vì user cần tạo riêng
@@ -433,7 +434,8 @@ Lỗi: "Module không chạy"
 
 📞 HỖ TRỢ
 ---------
-- Đọc HUONG_DAN_SU_DUNG.md (tiếng Việt)
+- ⭐ Đọc HUONG_DAN_CO_BAN.md ĐẦU TIÊN (hướng dẫn cơ bản)
+- Đọc HUONG_DAN_SU_DUNG.md (tiếng Việt, chi tiết)
 - Đọc README.md (technical docs)
 - Đọc PROJECT_COMPLETE.md (summary)
 - Kiểm tra file logs để debug
@@ -444,6 +446,7 @@ Lỗi: "Module không chạy"
 -------------------
 ✅ README.md - Technical documentation
 ✅ HUONG_DAN_SU_DUNG.md - User guide tiếng Việt (800+ dòng)
+✅ HUONG_DAN_CO_BAN.md - ⭐ Hướng dẫn cơ bản setup và chạy (ĐỌC ĐẦU TIÊN)
 ✅ PROJECT_COMPLETE.md - Project summary
 ✅ QUICK_CHECKLIST.md - Development checklist
 

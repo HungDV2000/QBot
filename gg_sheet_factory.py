@@ -29,13 +29,31 @@ def init_sheet_api():
     creds = Credentials.from_authorized_user_file("token.json", SCOPES)
   if not creds or not creds.valid:
     if creds and creds.expired and creds.refresh_token:
-      creds.refresh(Request())
+      try:
+        # Thử refresh token
+        creds.refresh(Request())
+        print("✅ Đã làm mới Google token thành công.", flush=True)
+      except Exception as e:
+        # Nếu refresh thất bại (token bị revoke), xóa token.json và tạo mới
+        print(f"⚠️ Không thể làm mới token: {e}", flush=True)
+        print("🔄 Xóa token cũ và tạo mới...", flush=True)
+        if os.path.exists("token.json"):
+          os.remove("token.json")
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            "credentials.json", SCOPES
+        )
+        creds = flow.run_local_server(port=0)
+        print("✅ Đã tạo token mới thành công.", flush=True)
     else:
+      # Chưa có token hoặc không hợp lệ, tạo mới
       flow = InstalledAppFlow.from_client_secrets_file(
           "credentials.json", SCOPES
       )
       creds = flow.run_local_server(port=0)
+      print("✅ Đã tạo token mới thành công.", flush=True)
     
+    # Lưu token mới
     with open("token.json", "w") as token:
       token.write(creds.to_json())
   try:
