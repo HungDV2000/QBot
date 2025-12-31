@@ -214,32 +214,23 @@ class CascadeManager:
         price_decimal = Decimal(str(price))
         tick_decimal = Decimal(str(tick_size))
         
-        # --- LOGIC: PRECISION ≤ 2 → Làm tròn THÔNG MINH ---
-        if precision <= 2:
-            # Xác định hướng làm tròn an toàn
-            if is_sl:
-                # STOP LOSS: Làm tròn để CẮT LỖ SỚM HƠN (bảo vệ vốn)
-                if is_long:
-                    # LONG SL: Làm tròn XUỐNG (giá thấp hơn → trigger sớm hơn)
-                    rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_DOWN) * tick_decimal
-                    method = "FLOOR (LONG SL - Bảo vệ vốn)"
-                else:
-                    # SHORT SL: Làm tròn LÊN (giá cao hơn → trigger sớm hơn)
-                    rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_UP) * tick_decimal
-                    method = "CEIL (SHORT SL - Bảo vệ vốn)"
+        # --- LOGIC: LUÔN ÁP DỤNG SMART ROUNDING CHO SL ---
+        if is_sl:
+            # STOP LOSS: Làm tròn để CẮT LỖ SỚM HƠN (bảo vệ vốn)
+            if is_long:
+                # LONG SL: Làm tròn XUỐNG (giá thấp hơn → trigger sớm hơn)
+                rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_DOWN) * tick_decimal
+                method = "FLOOR (LONG SL - Bảo vệ vốn)"
             else:
-                # TAKE PROFIT: Làm tròn GẦN NHẤT (activation gần với strategy, trailing sẽ tối ưu lời)
-                rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * tick_decimal
-                method = "NEAREST (TP - Gần strategy, activation sớm)"
-            
-            logger.info(f"   🎯 [SMART ROUNDING] Precision={precision} (≤2) → {method}")
-        
-        # --- LOGIC: PRECISION ≥ 3 → Làm tròn GẦN NHẤT ---
+                # SHORT SL: Làm tròn LÊN (giá cao hơn → trigger sớm hơn)
+                rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_UP) * tick_decimal
+                method = "CEIL (SHORT SL - Bảo vệ vốn)"
+            logger.info(f"   🎯 [SL ROUNDING] Precision={precision} → {method}")
         else:
-            # Làm tròn gần nhất theo tick_size
+            # TAKE PROFIT: Làm tròn GẦN NHẤT (activation gần với strategy, trailing sẽ tối ưu lời)
             rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * tick_decimal
-            method = "NEAREST (Precision ≥3, chênh lệch nhỏ)"
-            logger.info(f"   🎯 [STANDARD ROUNDING] Precision={precision} (≥3) → {method}")
+            method = "NEAREST (TP - Gần strategy)"
+            logger.info(f"   🎯 [TP ROUNDING] Precision={precision} → {method}")
         
         rounded = float(rounded_decimal)
         
