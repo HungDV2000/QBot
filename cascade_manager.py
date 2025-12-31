@@ -71,34 +71,67 @@ class CascadeManager:
         self.order_helper = order_helper
         self.layers = {}  # {symbol: {layer_num: LayerInfo}}
     
-    def get_tick_size(self, symbol: str) -> float:
+    def get_tick_size_from_filter(self, symbol: str) -> float:
         """
-        Lấy tick size (bước giá tối thiểu) của symbol
-        VD: ILV = 0.1, BTC = 0.01, ETH = 0.001
-        Trả về: float
+        Lấy tick size - ƯU TIÊN từ limits (chính xác hơn PRICE_FILTER)
         """
         try:
-            if symbol in self.exchange.markets:
-                tick_size = self.exchange.markets[symbol]['limits']['price']['min']
-                if tick_size and tick_size > 0:
-                    return float(tick_size)
+            # Thử cả 2 format: XXX/USDT và XXX/USDT:USDT
+            symbol_to_check = symbol
             
-            # Fallback: tick size mặc định
+            if symbol not in self.exchange.markets:
+                # Thử thêm :USDT nếu chưa có
+                if ':USDT' not in symbol and symbol.endswith('/USDT'):
+                    symbol_to_check = f"{symbol}:USDT"
+                # Thử bỏ :USDT nếu có
+                elif ':USDT' in symbol:
+                    symbol_to_check = symbol.replace(':USDT', '')
+                
+                # Kiểm tra lại
+                if symbol_to_check not in self.exchange.markets:
+                    logger.warning(f"   ⚠️ Symbol {symbol} (cũng thử {symbol_to_check}) không có trong markets")
+                    logger.warning(f"   📋 Markets có: {list(self.exchange.markets.keys())[:5]}...")
+                    return 0.001
+            
+            market = self.exchange.markets[symbol_to_check]
+            logger.info(f"   🔍 Lấy tick_size cho symbol: {symbol_to_check}")
+            
+            # ƯU TIÊN: Lấy từ limits (đã được CCXT parse đúng)
+            tick_size = market.get('limits', {}).get('price', {}).get('min')
+            if tick_size and tick_size > 0:
+                logger.info(f"   📍 Tick size từ limits: {tick_size}")
+                return float(tick_size)
+            
+            # FALLBACK: Lấy từ PRICE_FILTER
+            info = market.get('info', {})
+            filters = info.get('filters', [])
+            
+            for f in filters:
+                if f.get('filterType') == 'PRICE_FILTER':
+                    tick_size_raw = f.get('tickSize')
+                    if tick_size_raw:
+                        tick_size = float(tick_size_raw)
+                        if tick_size > 0:
+                            logger.info(f"   📍 Tick size từ PRICE_FILTER: {tick_size}")
+                            return tick_size
+            
+            logger.warning(f"   ⚠️ Không tìm thấy tick_size cho {symbol_to_check} → Dùng mặc định 0.001")
             return 0.001
+            
         except Exception as e:
-            logger.warning(f"⚠️ Không lấy được tick_size cho {symbol}: {e} → Dùng mặc định = 0.001")
+            logger.warning(f"⚠️ Lỗi lấy tick_size cho {symbol}: {e} → Dùng mặc định = 0.001")
+            import traceback
+            logger.warning(traceback.format_exc())
             return 0.001
     
     def get_price_precision(self, symbol: str) -> int:
         """
-        Lấy độ chính xác giá (số chữ số thập phân) từ tick_size
-        VD: tick_size = 0.1 → precision = 1
-            tick_size = 0.01 → precision = 2
+        Lấy độ chính xác giá từ tick_size
         """
         try:
-            tick_size = self.get_tick_size(symbol)
+            tick_size = self.get_tick_size_from_filter(symbol)
             
-            # Đếm số chữ số thập phân từ tick_size string
+            # Đếm số chữ số thập phân
             tick_str = f"{tick_size:.10f}".rstrip('0').rstrip('.')
             if '.' in tick_str:
                 precision = len(tick_str.split('.')[1])
@@ -107,7 +140,7 @@ class CascadeManager:
             
             return precision
         except Exception as e:
-            logger.warning(f"⚠️ Không tính được precision cho {symbol}: {e} → Dùng mặc định = 3")
+            logger.warning(f"⚠️ Không tính được precision: {e} → Dùng mặc định = 3")
             return 3
     
     def smart_round_price(self, price: float, symbol: str, is_sl: bool, is_long: bool) -> float:
@@ -123,20 +156,19 @@ class CascadeManager:
         Returns:
             Giá đã làm tròn
         """
-        import math
         from decimal import Decimal, ROUND_DOWN, ROUND_UP, ROUND_HALF_UP
         
-        tick_size = self.get_tick_size(symbol)
+        tick_size = self.get_tick_size_from_filter(symbol)
         precision = self.get_price_precision(symbol)
         
         logger.info(f"   📏 Tick Size: {tick_size}, Precision: {precision}")
         
+        # Chuyển sang Decimal để tránh lỗi floating point
+        price_decimal = Decimal(str(price))
+        tick_decimal = Decimal(str(tick_size))
+        
         # --- LOGIC: PRECISION ≤ 2 → Làm tròn THÔNG MINH ---
         if precision <= 2:
-            # Chuyển sang Decimal để tránh lỗi floating point
-            price_decimal = Decimal(str(price))
-            tick_decimal = Decimal(str(tick_size))
-            
             # Xác định hướng làm tròn an toàn
             if is_sl:
                 # STOP LOSS: Làm tròn để CẮT LỖ SỚM HƠN (bảo vệ vốn)
@@ -159,20 +191,16 @@ class CascadeManager:
                     rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_DOWN) * tick_decimal
                     method = "FLOOR (SHORT TP - Lời cao hơn)"
             
-            rounded = float(rounded_decimal)
             logger.info(f"   🎯 [SMART ROUNDING] Precision={precision} (≤2) → {method}")
         
         # --- LOGIC: PRECISION ≥ 3 → Làm tròn GẦN NHẤT ---
         else:
-            price_decimal = Decimal(str(price))
-            tick_decimal = Decimal(str(tick_size))
-            
             # Làm tròn gần nhất theo tick_size
             rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * tick_decimal
-            rounded = float(rounded_decimal)
-            
             method = "NEAREST (Precision ≥3, chênh lệch nhỏ)"
             logger.info(f"   🎯 [STANDARD ROUNDING] Precision={precision} (≥3) → {method}")
+        
+        rounded = float(rounded_decimal)
         
         # Tính % chênh lệch
         diff_percent = abs((rounded - price) / price * 100) if price > 0 else 0
