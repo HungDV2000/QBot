@@ -66,14 +66,8 @@ def test_precision():
     log(f"✅ Tìm thấy {len(active_symbols)} position đang mở")
     log("")
     
-    # Test các symbol đang có position
-    test_symbols = active_symbols if active_symbols else ['ILV/USDT:USDT', 'BTC/USDT:USDT', 'ETH/USDT:USDT']
-    
-    # Thêm một số symbol phổ biến để test
-    common_symbols = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'BNB/USDT:USDT', 'ILV/USDT:USDT']
-    for sym in common_symbols:
-        if sym not in test_symbols:
-            test_symbols.append(sym)
+    # CHỈ TEST ILV/USDT:USDT
+    test_symbols = ['ILV/USDT:USDT']
     
     log("="*60)
     log("📋 KẾT QUẢ TEST PRECISION:")
@@ -105,19 +99,26 @@ def test_precision():
             log(f"      - Price Precision: {precision_price}")
             log(f"      - Amount Precision: {precision_amount}")
             
-            # 2. Lấy limits
+            # 2. Lấy tick_size từ CCXT precision (ĐÚNG)
+            tick_size = market.get('precision', {}).get('price')
+            
+            # 3. Lấy limits (min/max price, KHÁC với tick_size)
             limits = market.get('limits', {})
             price_limits = limits.get('price', {})
             amount_limits = limits.get('amount', {})
             
-            tick_size = price_limits.get('min')
+            min_price = price_limits.get('min')  # GIÁ TỐI THIỂU (KHÔNG phải tick size)
+            max_price = price_limits.get('max')  # GIÁ TỐI ĐA
             min_amount = amount_limits.get('min')
             
-            log(f"   📌 Limits:")
-            log(f"      - Tick Size (Price Step): {tick_size}")
+            log(f"   📌 Tick Size (Bước giá) từ CCXT Precision:")
+            log(f"      - Tick Size: {tick_size}")
+            log(f"   📌 Limits (Giới hạn giao dịch):")
+            log(f"      - Min Price (Giá tối thiểu giao dịch): {min_price}")
+            log(f"      - Max Price (Giá tối đa giao dịch): {max_price}")
             log(f"      - Min Amount: {min_amount}")
             
-            # 3. Tính precision từ tick_size (cách cũ - bị lỗi)
+            # 4. Tính precision từ tick_size (cách cũ - bị lỗi)
             if tick_size:
                 import math
                 try:
@@ -126,7 +127,7 @@ def test_precision():
                 except:
                     log(f"   ⚠️ Không tính được precision từ log10")
                 
-                # 4. Tính precision từ string (cách mới)
+                # 5. Tính precision từ string (cách mới)
                 tick_str = f"{tick_size:.10f}".rstrip('0').rstrip('.')
                 if '.' in tick_str:
                     precision_from_str = len(tick_str.split('.')[1])
@@ -135,7 +136,7 @@ def test_precision():
                 
                 log(f"   📌 Precision từ string: {precision_from_str} (Tick String: '{tick_str}')")
             
-            # 5. Lấy thông tin từ info (raw data từ Binance)
+            # 6. Lấy thông tin từ info (raw data từ Binance)
             info = market.get('info', {})
             if info:
                 log(f"   📌 Raw Info từ Binance:")
@@ -153,25 +154,35 @@ def test_precision():
                 filters = info.get('filters', [])
                 for f in filters:
                     if f.get('filterType') == 'PRICE_FILTER':
-                        log(f"      - PRICE_FILTER tickSize: {f.get('tickSize')}")
+                        log(f"      - PRICE_FILTER:")
+                        log(f"        * tickSize (BƯỚC GIÁ): {f.get('tickSize')}")
+                        log(f"        * minPrice (GIÁ TỐI THIỂU): {f.get('minPrice')}")
+                        log(f"        * maxPrice (GIÁ TỐI ĐA): {f.get('maxPrice')}")
                         log(f"        Full PRICE_FILTER: {json.dumps(f, ensure_ascii=False)}")
                     elif f.get('filterType') == 'LOT_SIZE':
                         log(f"      - LOT_SIZE stepSize: {f.get('stepSize')}")
                         log(f"        Full LOT_SIZE: {json.dumps(f, ensure_ascii=False)}")
             
-            # 6. PHÂN TÍCH SỰ KHÁC BIỆT
+            # 7. PHÂN TÍCH SỰ KHÁC BIỆT
             log(f"   🔍 PHÂN TÍCH:")
-            log(f"      ┌─ CCXT Precision: {precision_price} → Cho phép đến {precision_price} chữ số")
-            log(f"      └─ Limits Tick Size: {tick_size} → Bước giá thực tế")
+            log(f"      ┌─ CCXT Precision (price): {precision_price}")
+            log(f"      │  → ĐÂY LÀ TICK SIZE (bước giá), KHÔNG phải số chữ số thập phân!")
+            log(f"      │")
+            log(f"      ├─ Limits Min Price: {min_price}")
+            log(f"      │  → Đây là GIÁ TỐI THIỂU cho phép giao dịch (KHÔNG phải tick size)")
+            log(f"      │  → ⚠️ LỖI CŨ: Code cũ lấy nhầm giá trị này làm tick_size!")
+            log(f"      │")
+            log(f"      └─ Kết luận:")
+            log(f"         ✅ Dùng: CCXT Precision (price) = {tick_size} làm Tick Size")
             
-            # Tính precision từ tick_size
+            # Tính precision (số chữ số thập phân) từ tick_size
             if tick_size:
                 tick_str = f"{tick_size:.10f}".rstrip('0').rstrip('.')
                 if '.' in tick_str:
                     real_precision = len(tick_str.split('.')[1])
                 else:
                     real_precision = 0
-                log(f"      └─ Precision từ Tick Size: {real_precision} ('{tick_str}')")
+                log(f"         ✅ Precision (số chữ số): {real_precision} từ Tick Size '{tick_str}'")
             
             log("")
             
@@ -208,16 +219,18 @@ def test_precision():
             
             # 8. GIẢI THÍCH KẾT QUẢ
             log(f"   📝 GIẢI THÍCH:")
-            if tick_size == 0.01:
-                log(f"      ✅ Tick Size = 0.01 → Giá CHỈ có thể: 5.71, 5.72, 5.73...")
-                log(f"      ❌ Không thể: 5.715, 5.716... (vi phạm bước giá)")
-            elif tick_size == 0.001:
-                log(f"      ✅ Tick Size = 0.001 → Giá có thể: 5.714, 5.715, 5.716...")
-            
-            if precision_price and tick_size:
-                if precision_price != tick_size:
-                    log(f"      ⚠️ CCXT Precision ({precision_price}) ≠ Tick Size ({tick_size})")
-                    log(f"      → Nên dùng Limits Tick Size ({tick_size}) để chính xác!")
+            if tick_size:
+                if tick_size == 0.01:
+                    log(f"      ✅ Tick Size = 0.01 → Giá CHỈ có thể: 5.71, 5.72, 5.73...")
+                    log(f"      ❌ Không thể: 5.715, 5.716... (vi phạm bước giá)")
+                elif tick_size == 0.001:
+                    log(f"      ✅ Tick Size = 0.001 → Giá có thể: 5.714, 5.715, 5.716...")
+                elif tick_size == 0.0001:
+                    log(f"      ✅ Tick Size = 0.0001 → Giá có thể: 5.7140, 5.7141, 5.7142...")
+                elif tick_size >= 0.1:
+                    log(f"      ✅ Tick Size = {tick_size} → Giá phải là bội số của {tick_size}")
+                
+                log(f"      💡 Binance CHỈ chấp nhận giá là bội số của Tick Size!")
             
             log("")
             
