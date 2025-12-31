@@ -181,15 +181,9 @@ class CascadeManager:
                     rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_UP) * tick_decimal
                     method = "CEIL (SHORT SL - Bảo vệ vốn)"
             else:
-                # TAKE PROFIT: Làm tròn để LẤY LỜI CAO HƠN
-                if is_long:
-                    # LONG TP: Làm tròn LÊN (giá cao hơn → lời nhiều hơn)
-                    rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_UP) * tick_decimal
-                    method = "CEIL (LONG TP - Lời cao hơn)"
-                else:
-                    # SHORT TP: Làm tròn XUỐNG (giá thấp hơn → lời nhiều hơn)
-                    rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_DOWN) * tick_decimal
-                    method = "FLOOR (SHORT TP - Lời cao hơn)"
+                # TAKE PROFIT: Làm tròn GẦN NHẤT (activation gần với strategy, trailing sẽ tối ưu lời)
+                rounded_decimal = (price_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * tick_decimal
+                method = "NEAREST (TP - Gần strategy, activation sớm)"
             
             logger.info(f"   🎯 [SMART ROUNDING] Precision={precision} (≤2) → {method}")
         
