@@ -135,30 +135,65 @@ def test_precision():
                     elif f.get('filterType') == 'LOT_SIZE':
                         print(f"      - LOT_SIZE stepSize: {f.get('stepSize')}", flush=True)
             
-            # 6. Test làm tròn thực tế
-            test_price = 3.9998
+            # 6. PHÂN TÍCH SỰ KHÁC BIỆT
+            print(f"   🔍 PHÂN TÍCH:", flush=True)
+            print(f"      ┌─ CCXT Precision: {precision_price} → Cho phép đến {precision_price} chữ số", flush=True)
+            print(f"      └─ Limits Tick Size: {tick_size} → Bước giá thực tế", flush=True)
             
-            print(f"   🧪 TEST: Làm tròn giá {test_price} bằng các phương pháp:", flush=True)
-            
-            # CCXT price_to_precision
-            try:
-                rounded_ccxt = exchange.price_to_precision(symbol, test_price)
-                print(f"      - CCXT price_to_precision: {rounded_ccxt}", flush=True)
-            except Exception as e:
-                print(f"      - CCXT price_to_precision: ❌ Lỗi ({e})", flush=True)
-            
-            # Manual rounding với precision
-            if precision_price is not None:
-                rounded_manual = round(test_price, int(precision_price))
-                print(f"      - round({test_price}, {precision_price}): {rounded_manual}", flush=True)
-            
-            # Manual rounding với tick_size
+            # Tính precision từ tick_size
             if tick_size:
-                from decimal import Decimal, ROUND_DOWN
-                test_decimal = Decimal(str(test_price))
-                tick_decimal = Decimal(str(tick_size))
-                rounded_tick = float((test_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_DOWN) * tick_decimal)
-                print(f"      - floor({test_price} / {tick_size}) * {tick_size}: {rounded_tick}", flush=True)
+                tick_str = f"{tick_size:.10f}".rstrip('0').rstrip('.')
+                if '.' in tick_str:
+                    real_precision = len(tick_str.split('.')[1])
+                else:
+                    real_precision = 0
+                print(f"      └─ Precision từ Tick Size: {real_precision} ('{tick_str}')", flush=True)
+            
+            print("", flush=True)
+            
+            # 7. TEST CỤ THỂ: Thử nhiều giá khác nhau
+            test_prices = [3.999, 3.9998, 5.714, 5.7145, 5.715, 9.142, 9.1424, 9.1426]
+            
+            print(f"   🧪 TEST CỤ THỂ: Làm tròn nhiều giá khác nhau", flush=True)
+            print(f"   {'Giá gốc':<12} | {'CCXT':<12} | {'Tick Size':<12} | {'Hợp lệ?':<10}", flush=True)
+            print(f"   {'-'*12}─┼─{'-'*12}─┼─{'-'*12}─┼─{'-'*10}", flush=True)
+            
+            from decimal import Decimal, ROUND_DOWN
+            
+            for test_price in test_prices:
+                # CCXT price_to_precision
+                try:
+                    rounded_ccxt = exchange.price_to_precision(symbol, test_price)
+                except:
+                    rounded_ccxt = "ERROR"
+                
+                # Làm tròn với tick_size
+                if tick_size:
+                    test_decimal = Decimal(str(test_price))
+                    tick_decimal = Decimal(str(tick_size))
+                    rounded_tick = float((test_decimal / tick_decimal).quantize(Decimal('1'), rounding=ROUND_DOWN) * tick_decimal)
+                else:
+                    rounded_tick = "N/A"
+                
+                # Kiểm tra giá có chia hết cho tick_size không
+                is_valid = "✅" if tick_size and (test_price % tick_size < 0.0000001) else "❌"
+                
+                print(f"   {test_price:<12.6f} | {str(rounded_ccxt):<12} | {rounded_tick:<12} | {is_valid:<10}", flush=True)
+            
+            print("", flush=True)
+            
+            # 8. GIẢI THÍCH KẾT QUẢ
+            print(f"   📝 GIẢI THÍCH:", flush=True)
+            if tick_size == 0.01:
+                print(f"      ✅ Tick Size = 0.01 → Giá CHỈ có thể: 5.71, 5.72, 5.73...", flush=True)
+                print(f"      ❌ Không thể: 5.715, 5.716... (vi phạm bước giá)", flush=True)
+            elif tick_size == 0.001:
+                print(f"      ✅ Tick Size = 0.001 → Giá có thể: 5.714, 5.715, 5.716...", flush=True)
+            
+            if precision_price and tick_size:
+                if precision_price != tick_size:
+                    print(f"      ⚠️ CCXT Precision ({precision_price}) ≠ Tick Size ({tick_size})", flush=True)
+                    print(f"      → Nên dùng Limits Tick Size ({tick_size}) để chính xác!", flush=True)
             
             print("", flush=True)
             
