@@ -84,31 +84,46 @@ class CascadeManager:
             float: Tick size (bước giá), mặc định 0.001 nếu không tìm thấy
         """
         try:
-            # Thử cả 2 format: XXX/USDT và XXX/USDT:USDT
+            # Xác định symbol chuẩn (ƯU TIÊN FUTURES nếu đang dùng futures)
             symbol_to_check = symbol
             
+            # Kiểm tra exchange type
+            is_futures = self.exchange.options.get('defaultType') == 'future'
+            
+            logger.info(f"   🔍 Tìm tick_size cho: {symbol} (Exchange type: {'Futures' if is_futures else 'Spot'})")
+            
             if symbol not in self.exchange.markets:
-                # Thử thêm :USDT nếu chưa có
-                if ':USDT' not in symbol and symbol.endswith('/USDT'):
+                logger.info(f"   ⚠️ Symbol {symbol} không tồn tại trực tiếp trong markets")
+                
+                # FUTURES: Thử thêm :USDT trước (XXX/USDT → XXX/USDT:USDT)
+                if is_futures and ':USDT' not in symbol and symbol.endswith('/USDT'):
                     symbol_to_check = f"{symbol}:USDT"
-                # Thử bỏ :USDT nếu có
+                    logger.info(f"   🔄 Thử format Futures: {symbol_to_check}")
+                    if symbol_to_check in self.exchange.markets:
+                        logger.info(f"   ✅ Tìm thấy: {symbol_to_check}")
+                    else:
+                        # Nếu vẫn không có, thử bỏ :USDT
+                        symbol_to_check = symbol.replace(':USDT', '') if ':USDT' in symbol else symbol
+                        logger.info(f"   🔄 Fallback: {symbol_to_check}")
+                # SPOT hoặc symbol có :USDT: Thử bỏ :USDT
                 elif ':USDT' in symbol:
                     symbol_to_check = symbol.replace(':USDT', '')
+                    logger.info(f"   🔄 Thử format Spot: {symbol_to_check}")
                 
                 # Kiểm tra lại
                 if symbol_to_check not in self.exchange.markets:
-                    logger.warning(f"   ⚠️ Symbol {symbol} (cũng thử {symbol_to_check}) không có trong markets")
-                    logger.warning(f"   📋 Markets có: {list(self.exchange.markets.keys())[:5]}...")
+                    logger.warning(f"   ❌ Không tìm thấy {symbol} hoặc {symbol_to_check} trong markets")
+                    logger.warning(f"   📋 Markets mẫu: {list(self.exchange.markets.keys())[:5]}...")
                     return 0.001
             
             market = self.exchange.markets[symbol_to_check]
-            logger.info(f"   🔍 Lấy tick_size cho symbol: {symbol_to_check}")
+            logger.info(f"   ✅ Sử dụng market: {symbol_to_check}")
             
             # ƯU TIÊN 1: Lấy từ CCXT precision['price'] 
             # → Đây chính là TICK SIZE từ Binance, đã được CCXT parse sẵn
             tick_size = market.get('precision', {}).get('price')
             if tick_size and tick_size > 0:
-                logger.info(f"   📍 ✅ Tick size từ CCXT precision: {tick_size}")
+                logger.info(f"   📍 ✅ Tick size từ CCXT precision['{symbol_to_check}']: {tick_size}")
                 return float(tick_size)
             
             # FALLBACK: Lấy từ PRICE_FILTER trong info (raw data từ Binance)
@@ -121,10 +136,11 @@ class CascadeManager:
                     if tick_size_raw:
                         tick_size = float(tick_size_raw)
                         if tick_size > 0:
-                            logger.info(f"   📍 ✅ Tick size từ PRICE_FILTER (fallback): {tick_size}")
+                            logger.info(f"   📍 ✅ Tick size từ PRICE_FILTER['{symbol_to_check}']: {tick_size}")
                             return tick_size
             
             logger.warning(f"   ⚠️ Không tìm thấy tick_size cho {symbol_to_check} → Dùng mặc định 0.001")
+            logger.warning(f"   📊 Market info: {market.get('info', {}).get('symbol', 'N/A')}")
             return 0.001
             
         except Exception as e:
