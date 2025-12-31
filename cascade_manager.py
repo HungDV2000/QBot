@@ -71,6 +71,88 @@ class CascadeManager:
         self.order_helper = order_helper
         self.layers = {}  # {symbol: {layer_num: LayerInfo}}
     
+    def get_price_precision(self, symbol: str) -> int:
+        """
+        Lấy độ chính xác giá (số chữ số thập phân) của symbol
+        Trả về: int (VD: 1, 2, 3...)
+        """
+        try:
+            if symbol in self.exchange.markets:
+                # Cách 1: Lấy trực tiếp từ precision
+                precision = self.exchange.markets[symbol]['precision'].get('price')
+                if precision is not None:
+                    return int(precision)
+                
+                # Cách 2: Tính từ tickSize
+                tick_size = self.exchange.markets[symbol]['limits']['price']['min']
+                if tick_size:
+                    # VD: 0.1 → 1, 0.01 → 2, 0.001 → 3
+                    import math
+                    precision = abs(int(math.floor(math.log10(tick_size))))
+                    return precision
+            
+            # Fallback: precision mặc định
+            return 3
+        except Exception as e:
+            logger.warning(f"⚠️ Không lấy được precision cho {symbol}: {e} → Dùng mặc định = 3")
+            return 3
+    
+    def smart_round_price(self, price: float, symbol: str, is_sl: bool, is_long: bool) -> float:
+        """
+        Làm tròn giá thông minh dựa trên precision
+        
+        Args:
+            price: Giá cần làm tròn
+            symbol: Mã coin
+            is_sl: True = Stop Loss, False = Take Profit
+            is_long: True = LONG, False = SHORT
+        
+        Returns:
+            Giá đã làm tròn
+        """
+        precision = self.get_price_precision(symbol)
+        
+        # --- LOGIC: PRECISION ≤ 2 → Làm tròn THÔNG MINH ---
+        if precision <= 2:
+            import math
+            
+            # Xác định hướng làm tròn an toàn
+            if is_sl:
+                # STOP LOSS: Làm tròn để CẮT LỖ SỚM HƠN (bảo vệ vốn)
+                if is_long:
+                    # LONG SL: Làm tròn XUỐNG (giá thấp hơn → trigger sớm hơn)
+                    rounded = math.floor(price * (10 ** precision)) / (10 ** precision)
+                    method = "FLOOR (LONG SL - Bảo vệ vốn)"
+                else:
+                    # SHORT SL: Làm tròn LÊN (giá cao hơn → trigger sớm hơn)
+                    rounded = math.ceil(price * (10 ** precision)) / (10 ** precision)
+                    method = "CEIL (SHORT SL - Bảo vệ vốn)"
+            else:
+                # TAKE PROFIT: Làm tròn để LẤY LỜI CAO HƠN
+                if is_long:
+                    # LONG TP: Làm tròn LÊN (giá cao hơn → lời nhiều hơn)
+                    rounded = math.ceil(price * (10 ** precision)) / (10 ** precision)
+                    method = "CEIL (LONG TP - Lời cao hơn)"
+                else:
+                    # SHORT TP: Làm tròn XUỐNG (giá thấp hơn → lời nhiều hơn)
+                    rounded = math.floor(price * (10 ** precision)) / (10 ** precision)
+                    method = "FLOOR (SHORT TP - Lời cao hơn)"
+            
+            logger.info(f"   🎯 [SMART ROUNDING] Precision={precision} (≤2) → {method}")
+        
+        # --- LOGIC: PRECISION ≥ 3 → Làm tròn GẦN NHẤT ---
+        else:
+            rounded = round(price, precision)
+            method = "NEAREST (Precision ≥3, chênh lệch nhỏ)"
+            logger.info(f"   🎯 [STANDARD ROUNDING] Precision={precision} (≥3) → {method}")
+        
+        # Tính % chênh lệch
+        diff_percent = abs((rounded - price) / price * 100) if price > 0 else 0
+        
+        logger.info(f"   📊 Giá gốc: {price:.8f} → Giá sau làm tròn: {rounded:.8f} (Chênh lệch: {diff_percent:.4f}%)")
+        
+        return rounded
+    
     def get_or_create_layer(self, symbol: str, layer_num: int) -> LayerInfo:
         """Lấy hoặc tạo mới LayerInfo"""
         if symbol not in self.layers:
@@ -200,20 +282,13 @@ class CascadeManager:
             logger.error(f"   ❌ Lỗi: Giá SL tính ra <= 0 ({stop_price_raw})")
             raise ValueError(f"Stop price tính được = {stop_price_raw} (phải > 0). Entry: {entry_price}, Rate: {lenh2_rate}")
         
-        # Làm tròn
-        try:
-            stop_price_str = self.exchange.price_to_precision(symbol, stop_price_raw)
-            stop_price = float(stop_price_str)
-            logger.info(f"   - Giá sau làm tròn (Final SL): {stop_price}")
-        except Exception as e:
-            try:
-                precision = binance_utils.get_price_precision(symbol)
-                if precision is None or precision < 0:
-                    precision = 3
-                stop_price = round(stop_price_raw, precision)
-                logger.warning(f"   ⚠️ Dùng round() fallback: {stop_price} (Lỗi: {e})")
-            except Exception as e2:
-                raise ValueError(f"Không thể làm tròn stop_price cho {symbol}: {e2}")
+        # [NEW] Làm tròn THÔNG MINH
+        stop_price = self.smart_round_price(
+            price=stop_price_raw,
+            symbol=symbol,
+            is_sl=True,  # Đây là Stop Loss
+            is_long=is_long
+        )
         
         if stop_price <= 0:
             raise ValueError(f"Stop price sau khi làm tròn = {stop_price} (phải > 0). Giá gốc: {stop_price_raw}")
@@ -301,20 +376,13 @@ class CascadeManager:
             logger.error(f"   ❌ Lỗi: Giá TP tính ra <= 0 ({activation_price_raw})")
             raise ValueError(f"Activation price tính được = {activation_price_raw} (phải > 0). Entry: {entry_price}, Rate: {lenh3_rate}")
         
-        # Làm tròn
-        try:
-            activation_price_str = self.exchange.price_to_precision(symbol, activation_price_raw)
-            activation_price = float(activation_price_str)
-            logger.info(f"   - Giá sau làm tròn (Final TP): {activation_price}")
-        except Exception as e:
-            try:
-                precision = binance_utils.get_price_precision(symbol)
-                if precision is None or precision < 0:
-                    precision = 3
-                activation_price = round(activation_price_raw, precision)
-                logger.warning(f"   ⚠️ Dùng round() fallback: {activation_price} (Lỗi: {e})")
-            except Exception as e2:
-                raise ValueError(f"Không thể làm tròn activation_price cho {symbol}: {e2}")
+        # [NEW] Làm tròn THÔNG MINH
+        activation_price = self.smart_round_price(
+            price=activation_price_raw,
+            symbol=symbol,
+            is_sl=False,  # Đây là Take Profit
+            is_long=is_long
+        )
         
         if activation_price <= 0:
             raise ValueError(f"Activation price sau khi làm tròn = {activation_price} (phải > 0). Giá gốc: {activation_price_raw}")
