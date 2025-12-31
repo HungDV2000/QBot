@@ -73,7 +73,15 @@ class CascadeManager:
     
     def get_tick_size_from_filter(self, symbol: str) -> float:
         """
-        Lấy tick size - ƯU TIÊN từ limits (chính xác hơn PRICE_FILTER)
+        Lấy tick size (bước giá tối thiểu) từ Binance
+        
+        ⚠️ LƯU Ý: 
+        - CCXT precision['price'] = TICK SIZE (bước giá, VD: 0.001, 0.01, 0.1)
+        - limits['price']['min'] = MIN PRICE (giá tối thiểu giao dịch, VD: 0.01, 556.8)
+        → KHÔNG NÊN LẤY limits['price']['min'] làm tick_size!
+        
+        Returns:
+            float: Tick size (bước giá), mặc định 0.001 nếu không tìm thấy
         """
         try:
             # Thử cả 2 format: XXX/USDT và XXX/USDT:USDT
@@ -96,13 +104,14 @@ class CascadeManager:
             market = self.exchange.markets[symbol_to_check]
             logger.info(f"   🔍 Lấy tick_size cho symbol: {symbol_to_check}")
             
-            # ƯU TIÊN: Lấy từ limits (đã được CCXT parse đúng)
-            tick_size = market.get('limits', {}).get('price', {}).get('min')
+            # ƯU TIÊN 1: Lấy từ CCXT precision['price'] 
+            # → Đây chính là TICK SIZE từ Binance, đã được CCXT parse sẵn
+            tick_size = market.get('precision', {}).get('price')
             if tick_size and tick_size > 0:
-                logger.info(f"   📍 Tick size từ limits: {tick_size}")
+                logger.info(f"   📍 ✅ Tick size từ CCXT precision: {tick_size}")
                 return float(tick_size)
             
-            # FALLBACK: Lấy từ PRICE_FILTER
+            # FALLBACK: Lấy từ PRICE_FILTER trong info (raw data từ Binance)
             info = market.get('info', {})
             filters = info.get('filters', [])
             
@@ -112,7 +121,7 @@ class CascadeManager:
                     if tick_size_raw:
                         tick_size = float(tick_size_raw)
                         if tick_size > 0:
-                            logger.info(f"   📍 Tick size từ PRICE_FILTER: {tick_size}")
+                            logger.info(f"   📍 ✅ Tick size từ PRICE_FILTER (fallback): {tick_size}")
                             return tick_size
             
             logger.warning(f"   ⚠️ Không tìm thấy tick_size cho {symbol_to_check} → Dùng mặc định 0.001")
